@@ -1,0 +1,14 @@
+# Local environment files and credentials
+.env
+.env.*
+!.env.example
+
+# Local desktop metadata
+.DS_Store
+
+# Python generated files
+__pycache__/
+*.py[cod]
+
+# Local market observation database and SQLite sidecars
+/backend/data/market-observations.sqlite3*
