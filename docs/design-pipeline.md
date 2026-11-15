@@ -68,6 +68,12 @@ The paper account runs in the observation database. Its live AAPL account and ea
 
 Cash and cost basis use decimal arithmetic. A sale deducts its proportional basis, and a full sale removes the remaining basis. Each fill writes a P&L snapshot. The first usable completed one-minute close after the latest account event supplies a valuation, with one saved row per completed candle and no rewrites of historical rows. The candle-end timestamp represents the close price time. The browser displays historical replay accounts separately from the live paper account.
 
+## Completed-candle decisions (Prompt 10)
+
+The server reads market evidence and the paper ledger in one SQLite read transaction. The selected bucket's end time is the receipt cutoff. Replay contributes its selected start, row ceiling, and cursor so a later receipt or revision cannot leak into the snapshot. The position and cash come from the last fill snapshot available by that cutoff, or the starting balance if there was no fill. The snapshot stores the exact candle and SMA series separately from the compact facts sent to the model. It has its own ID and a read endpoint for a reproducible chart.
+
+The local Decisions API sends the frozen facts as JSON to the OpenAI Decisions API with the named choice `paper_action`. Python checks the returned choice against the saved cash, position, and order size. The explanation uses the recorded facts and validation result. SQLite keeps the provider/model, proposal, explanation, validation status, and snapshot reference under the returned local decision ID. Test evidence, missing inputs, provider errors, and account-rule failures never yield an eligible paper order. A valid proposal is evaluated using the snapshot price. Any future execution must recheck the current ledger and next fill price. [OpenAI Decisions API](https://developers.openai.com/api/docs/guides/decisions)
+
 ## Future integration flow
 
 ```text

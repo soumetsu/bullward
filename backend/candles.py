@@ -1,7 +1,7 @@
 """Build one-minute candles from saved Yahoo Finance observations."""
 
 import argparse
-from contextlib import closing
+from contextlib import closing, nullcontext
 from datetime import UTC, datetime, timedelta
 from itertools import groupby
 import json
@@ -50,6 +50,7 @@ def load_observed_minutes(
     received_from: datetime | None = None,
     through_id: int = 9_223_372_036_854_775_807,
     at_id: int = 9_223_372_036_854_775_807,
+    connection: sqlite3.Connection | None = None,
 ) -> tuple[list[CandleMinute], int | None]:
     """Return candles and the most recent effective source timestamp in milliseconds."""
     cutoff = as_of if as_of is not None else datetime.now(UTC)
@@ -65,8 +66,9 @@ def load_observed_minutes(
     previous_total: int | None = None
     latest_source_ms = None
     db_uri = db_path.resolve().as_uri() + "?mode=ro"
-    with closing(sqlite3.connect(db_uri, uri=True)) as connection:
-        rows = connection.execute(
+    reader = nullcontext(connection) if connection is not None else closing(sqlite3.connect(db_uri, uri=True))
+    with reader as db:
+        rows = db.execute(
             """WITH known AS (
                    SELECT id, source_time_ms, received_at_utc, source_message_json, revision_of_id
                    FROM observations WHERE source = ? AND ticker = ?

@@ -310,3 +310,21 @@ The first numerical assertion compared stored decimal spellings and rejected equ
 The final `python -m scripts.check_prompt9` also passed live matching with constructed prices. A pending order ignored pre-submission observations, two buy prices produced average cost 110, a partial sale realized 15 and left 45 unrealized, and the matcher rejected fractional quantity, insufficient cash, and a second sale exceeding the remaining position. Existing replay, minute candle, timeframe, SQLite restart, and chart adapter checks passed. Vite built 25 modules successfully, and `git diff --check` passed.
 
 The sandbox blocked the process inventory check used to identify the running development backend. The outside-sandbox restart verified ownership by the listener's command line and left the development services running. FastAPI health on port 8001 and the frontend, indicators, and paper endpoints through Vite on port 5175 each returned HTTP 200.
+
+## Prompt 10
+
+Committed and pushed the reviewed Prompt 9 changes to `origin/main` as `95d6f02`. Confirmed Python 3.14.8, Node 24.21.0, npm 11.19.0, pnpm 11.25.0, Corepack 0.36.0, Windows 10.0.26200.0, and the existing package tree. `python -m pip check` found no broken requirements. The implementation uses the existing runtime and the Python standard-library HTTP client. The request and named choice match the [OpenAI Decisions API guide](https://developers.openai.com/api/docs/guides/decisions).
+
+| Check | Observed |
+|---|---|
+| `python -m scripts.check_decisions` | Passed against a temporary SQLite database and FastAPI process outside the sandbox. The initial sandbox run timed out waiting for local health. |
+| As-of snapshot and replay readback | 14:32 UTC AAPL candle, knowledge cutoff 14:33 UTC, close 95, SMA 102.5 and 101.33333333333333, and paper cash 710 with 3 shares. The later price of 80 and the later close fill were excluded. Snapshot GET matched the original response. |
+| Controlled provider | The outgoing request matched the documented endpoint and included the five allowed choices under `paper_action`. A hold returned `valid`. A timeout, wrong answer name, and wait with an open position returned `timeout`, `malformed_answer`, and `invalid_proposal` respectively. The sell proposed one share and was ineligible for a paper order because the market input was constructed. |
+| Missing input | Existing snapshot with a 25-candle SMA warm-up gap and a request with no snapshot ID each returned `missing_input` without invoking the transport. |
+| Saved decisions and paper state | Every HTTP result matched its saved decision by ID. All paper account, order, fill, and P&L rows matched the precheck SQLite read. |
+| `python -m scripts.check_decisions --live` | With constructed market data, the local endpoint saved `provider_unconfigured` and `model_call: not_sent`. The script exited 2. No OpenAI request was sent because `OPENAI_API_KEY` was absent from the backend environment. Live provider response matching remains pending. |
+| Existing regressions | `python -m scripts.check_prompt9`, `python -m scripts.check_replay`, minute candles, timeframe, and chart adapter checks passed. The 25-module Vite build passed. |
+
+The market and provider checks are independent. The regular AAPL session is closed on the weekend, and Prompt 10's provider smoke test uses constructed candles. The prior market-hours quote check remains pending. [Nasdaq trading hours](https://www.nasdaq.com/market-activity/stock-market-holiday-schedule)
+
+Restarted the development FastAPI process. Backend health, frontend, proxied paper account, and OpenAPI returned HTTP 200. The served OpenAPI document includes both Decisions POST routes.

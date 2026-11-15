@@ -11,6 +11,7 @@ from .timeframes import aggregate_candles
 
 STARTING_CASH = "1000"
 LIVE_BOOK = "live"
+DEFAULT_ORDER_SIZE = 1
 
 SCHEMA = """
 BEGIN IMMEDIATE;

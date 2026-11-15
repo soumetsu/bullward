@@ -199,4 +199,24 @@ Run `python -m scripts.check_prompt9` for the calculations and `python scripts/s
 3. Start **AAPL**. Buy 4 at the first frame and advance once to fill at $100. Advance through 14:32:05 UTC and sell 1, then advance once to fill at $110. Advance through 14:33:01 UTC and close the position, then advance once to fill at $105. Try to sell one more share and verify the rejection.
 4. Check **P&L history**, then create the empty `restart` file in the printed fixture directory. The runner resends the first request and restarts FastAPI. Open **Paper account**, select the saved AAPL replay, and compare the history again. Write PASS to the printed result file after the check.
 
-Prompt 10 covers requesting a decision about a completed candle.
+## Decisions on a completed candle
+
+Post a completed candle's UTC start to `POST /api/decision-snapshots`. The server freezes the observations and revisions it had at the candle close, calculates the SMA pair, and reads the paper ledger as of that same time. The returned snapshot contains the chart data and a unique ID. Creating or reading a snapshot makes no model request.
+
+```json
+{
+  "symbol": "AAPL",
+  "interval": "1m",
+  "timestamp": "2026-11-09T14:32:00Z",
+  "short": 2,
+  "long": 3
+}
+```
+
+For Replay, include a `replay` object with `start` (UTC receipt range start), `cursor` (the current observation ID), `through_id` (the original replay ceiling), and, if an account has been opened, its `book` UUID. Replay must have reached the selected candle's closing time.
+
+Post `{"snapshot_id": "<snapshot UUID>"}` to `POST /api/decisions`. The result separates the model proposal from frozen facts and backend validation. `GET /api/decision-snapshots/{id}` returns the saved snapshot and `GET /api/decisions/{id}` returns the saved result. The endpoint leaves the paper ledger untouched. The proposal uses the configured order size for buys and sells. Set `INVEST_PAPER_ORDER_SIZE` in the backend environment to change the default of one share.
+
+The OpenAI provider uses the backend's `OPENAI_API_KEY` environment variable. The root `.env` is a local placeholder and the app does not load it automatically. Run `python -m scripts.check_decisions` for the local HTTP smoke test with a controlled provider. To make one real OpenAI request against a separate constructed database, supply the key in the environment and run `python -m scripts.check_decisions --live`. [OpenAI Decisions API](https://developers.openai.com/api/docs/guides/decisions)
+
+Prompt 10A covers a chart screenshot for the Decisions API.

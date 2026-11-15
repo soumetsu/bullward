@@ -4,7 +4,7 @@ Updated: 2026-11-15
 
 ## Current handoff
 
-The repository is on `main`. Prompt 8 was pushed to `origin/main` as `dc1ef87`. Prompts 9 and 9A–9D are implemented in the working tree for review. The numbered sections below preserve each session's record.
+The repository is on `main`. Prompts 9 and 9A–9D were pushed to `origin/main` as `95d6f02`. Prompt 10 is implemented in the working tree for review. The numbered sections below preserve each session's record.
 
 ## Project and root
 
@@ -107,3 +107,11 @@ The Yahoo retry opened its socket on Sunday, sent the subscription, and received
 The offline browser smoke test passed with both markers, persisted Range 2/3, five expected P&L rows, three fills, one rejected order, and an unchanged history after a backend restart and an HTTP retry. Initial checks hit decimal string comparison and the browser confirmation timeout. Both passed after correction. The development dashboard on port 5175 and FastAPI on port 8001 are running with the new code. The indicator and paper endpoints returned HTTP 200 through Vite. See `docs/verification.md` for the full results.
 
 Next implementation prompt when requested: Prompt 10. The working tree awaits review. The market-hours Yahoo quote check and replay of a real capture remain pending.
+
+## Prompt 10
+
+`backend/decisions.py` freezes observed candles, SMA values and crossover, and historical paper cash and shares at the selected candle close. `backend/main.py` exposes snapshot creation and readback plus the Decisions API and saved result readback. The OpenAI transport uses the standard library. `scripts/check_decisions.py` verifies the HTTP flow against a separate constructed SQLite store. The original prompt remains under `prompts/prompts/`. No new packages or manifests.
+
+`python -m scripts.check_decisions` passed outside the sandbox after a local health timeout. It checked the original $95 close, $710 and 3 shares, valid hold, timeout, malformed answer, invalid proposal, missing evidence, and unchanged paper rows. `python -m scripts.check_decisions --live` recorded `provider_unconfigured` and exited 2. Install no key in source or chat. Use `OPENAI_API_KEY` in the backend process environment for live verification on the same constructed fixture. The market-hours Yahoo check remains independent and pending. Earlier Prompt 9 and frontend regressions passed.
+
+FastAPI on port 8001 and Vite on port 5175 are running. The OpenAPI document confirms both new POST routes. Next implementation prompt when requested: Prompt 10A. Prompt 10 awaits review before commit.

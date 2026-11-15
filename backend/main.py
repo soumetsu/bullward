@@ -12,6 +12,7 @@ from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocket
 from pydantic import BaseModel, Field
 
 from .candles import load_observed_minutes
+from .decisions import DecisionRequest, SnapshotRequest, create_snapshot, get_decision, get_snapshot, request_decision
 from .indicators import (
     IndicatorConfig, IndicatorRequest, available_types, calculate_indicators,
     configurations, save_configuration,
@@ -187,6 +188,36 @@ def submit_paper_order(order: PaperOrderRequest):
                               order.action, str(order.request_id), order.quantity, order.cursor)
     except ValueError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.post("/api/decision-snapshots", status_code=201)
+def freeze_decision_snapshot(selection: SnapshotRequest):
+    try:
+        return create_snapshot(app.state.feed.db_path, selection, app.state.source_label)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.get("/api/decision-snapshots/{snapshot_id}")
+def read_decision_snapshot(snapshot_id: UUID):
+    snapshot = get_snapshot(app.state.feed.db_path, str(snapshot_id))
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="Decision snapshot not found.")
+    return snapshot
+
+
+@app.post("/api/decisions", status_code=201)
+def decide(request: DecisionRequest | None = None):
+    snapshot_id = str(request.snapshot_id) if request and request.snapshot_id else None
+    return request_decision(app.state.feed.db_path, snapshot_id)
+
+
+@app.get("/api/decisions/{decision_id}")
+def read_decision(decision_id: UUID):
+    decision = get_decision(app.state.feed.db_path, str(decision_id))
+    if decision is None:
+        raise HTTPException(status_code=404, detail="Decision not found.")
+    return decision
 
 
 @app.websocket("/api/candles/live")
