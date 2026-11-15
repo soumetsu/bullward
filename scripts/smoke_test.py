@@ -1,4 +1,4 @@
-"""Prompt 4 SmokeTest: HTTP checks plus a human/agent browser observation.
+"""Dashboard SmokeTest: HTTP checks plus a human/agent browser observation.
 
 Run from the project root: python scripts/smoke_test.py
 Use --no-open when an agent opens the printed URL with its browser tool.
@@ -6,6 +6,7 @@ No source edits, additional packages, or stored data are required.
 """
 import argparse
 from contextlib import closing
+from decimal import Decimal
 import json
 import os
 from pathlib import Path
@@ -16,7 +17,7 @@ import subprocess
 import sys
 import tempfile
 import time
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 import webbrowser
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -42,14 +43,38 @@ def wait_ready(url, process):
     raise RuntimeError(f'Timed out waiting for {url}')
 
 
+def paper_snapshot(database):
+    with closing(sqlite3.connect(database.resolve().as_uri() + '?mode=ro', uri=True)) as connection:
+        return tuple(connection.execute(f'SELECT * FROM {table} ORDER BY rowid').fetchall()
+                     for table in ('paper_orders', 'paper_fills', 'paper_pnl'))
+
+
+def retry_first_order(database, frontend_url):
+    with closing(sqlite3.connect(database.resolve().as_uri() + '?mode=ro', uri=True)) as connection:
+        book, request_id, symbol, cursor = connection.execute(
+            'SELECT account_id, request_id, symbol, after_id FROM paper_orders WHERE id = 1'
+        ).fetchone()
+    payload = json.dumps(dict(book=book, request_id=request_id, symbol=symbol, cursor=cursor,
+                              action='buy', quantity=4)).encode()
+    request = Request(frontend_url + '/api/paper/orders', data=payload, headers={'Content-Type': 'application/json'})
+    with urlopen(request, timeout=5) as response:
+        assert json.load(response)['id'] == 1
+    print('HTTP retry returned the same paper order #1.', flush=True)
+
+
 def main():
     args = argparse.ArgumentParser(description=__doc__)
     args.add_argument('--no-open', action='store_true')
     args.add_argument('--browser-result-file', type=Path, help='Agent mode: wait for a fresh PASS/FAIL file written after browser observation.')
+    args.add_argument('--browser-timeout', type=int, default=600, help='Seconds to wait for an agent browser result.')
     mode = args.add_mutually_exclusive_group()
     mode.add_argument('--live', action='store_true', help='Verify the Yahoo dashboard with a disposable database.')
     mode.add_argument('--fixture', action='store_true', help='Exercise the live dashboard with labeled constructed input.')
+    mode.add_argument('--replay', action='store_true', help='Verify two offline replays against a separate constructed store.')
+    mode.add_argument('--prompt9', action='store_true', help='Verify indicators and paper execution with constructed replay data.')
     options = args.parse_args()
+    if options.browser_timeout <= 0:
+        args.error('--browser-timeout must be positive.')
     if options.browser_result_file and options.browser_result_file.exists():
         raise RuntimeError('Browser result file must not exist before the check starts.')
     node = shutil.which('node')
@@ -73,6 +98,14 @@ def main():
                 else:
                     backend_env['INVEST_LIVE_FEED'] = '0'
                     backend_args = ['uvicorn', 'backend.main:app', '--host', '127.0.0.1', '--port', str(backend_port)]
+                if options.replay or options.prompt9:
+                    module = 'scripts.check_prompt9' if options.prompt9 else 'scripts.check_replay'
+                    subprocess.run(
+                        [sys.executable, '-m', module, '--seed', str(database)],
+                        cwd=ROOT, check=True, timeout=30, **common,
+                    )
+                    backend_env['INVEST_SOURCE_LABEL'] = 'Constructed replay test data'
+                    snapshot = database.read_bytes()
                 backend = subprocess.Popen([sys.executable, '-m', *backend_args], cwd=ROOT, env=backend_env, **common)
                 processes.append(backend)
                 wait_ready(backend_url + '/api/health', backend)
@@ -86,11 +119,28 @@ def main():
                 assert len(rows) == 3, f'Expected three fixture candles, got {len(rows)}'
                 assert rows[1] == expected, f'Unexpected middle candle: {rows[1]}'
                 print('HTTP PASS: three candles; 14:31 UTC matches all six source fields.', flush=True)
-                browser_url = frontend_url if options.live or options.fixture else frontend_url + '/?source=sample'
+                browser_url = frontend_url
+                if options.replay or options.prompt9:
+                    browser_url += '/?source=replay'
+                elif not (options.live or options.fixture):
+                    browser_url += '/?source=sample'
                 print(f'BROWSER URL: {browser_url}', flush=True)
                 if not options.no_open:
                     webbrowser.open(browser_url)
-                if options.live or options.fixture:
+                if options.prompt9:
+                    print(f'Constructed replay database: {database}', flush=True)
+                    print('Replay SMA, then RANGE, then AAPL as described in README.md. Create the empty '
+                          f'file "restart" in {temp} after checking P&L. The runner retries the first buy '
+                          'request and restarts FastAPI. Then reopen the saved paper account.', flush=True)
+                elif options.replay:
+                    print(f'Constructed replay test database: {database}', flush=True)
+                    print('Confirm AAPL and Live feed disabled. Start the default UTC receipt range. '
+                          'Select the 14:31 UTC candle after advancing to receipt 14:32:06. '
+                          'Expect close 104 and volume 18 (1018 - 1000). At the next receipt, the late price '
+                          'raises the high to 108. The correction at that same receipt time changes close to 103 '
+                          'and volume to 20 (1020 - 1000). Restart and compare. Try a range after 15:00 UTC '
+                          'and check for the no-recorded-observations message.', flush=True)
+                elif options.live or options.fixture:
                     print(f'Disposable observation database: {database}', flush=True)
                     print(f'Touch the file "disconnect" in {temp} while the dashboard is open. '
                           'Confirm Upstream disconnected and Dashboard socket · Connected.', flush=True)
@@ -105,15 +155,33 @@ def main():
                               'on screen. Verify a timeframe switch. If no regular-session price arrives, report pending.', flush=True)
                 else:
                     print('Browser check: confirm three distinct candles with aligned volume bars. Select 14:31 UTC; expect Nov 9, 2026, O 102, H 104, L 100, C 101, volume 850 shares. Check Reset view and TradingView attribution.', flush=True)
-                if options.browser_result_file:
-                    print(f'Waiting for browser observation in {options.browser_result_file}', flush=True)
-                    deadline = time.monotonic() + 600
-                    while not options.browser_result_file.exists():
+                if options.browser_result_file or options.prompt9:
+                    result_file = options.browser_result_file or Path(temp) / 'browser-result.txt'
+                    if options.prompt9:
+                        print('Write PASS to the result file after checking the restored account, or FAIL on discrepancy.', flush=True)
+                    print(f'Waiting for browser observation in {result_file}', flush=True)
+                    deadline = time.monotonic() + options.browser_timeout
+                    restarted = False
+                    restart_marker = Path(temp) / 'restart'
+                    while not result_file.exists():
+                        if options.prompt9 and restart_marker.exists() and not restarted:
+                            before_restart = paper_snapshot(database)
+                            retry_first_order(database, frontend_url)
+                            backend.terminate()
+                            backend.wait(timeout=5)
+                            backend = subprocess.Popen(
+                                [sys.executable, '-m', *backend_args], cwd=ROOT, env=backend_env, **common,
+                            )
+                            processes.append(backend)
+                            wait_ready(backend_url + '/api/health', backend)
+                            assert paper_snapshot(database) == before_restart, 'Stored paper history changed after retry or restart.'
+                            restarted = True
+                            print(f'FastAPI restarted (PID {backend.pid}). Refresh the paper account page.', flush=True)
                         if time.monotonic() > deadline:
                             raise RuntimeError('Browser observation timed out.')
                         time.sleep(0.2)
-                    answer = options.browser_result_file.read_text(encoding='utf-8-sig')
-                    options.browser_result_file.unlink()
+                    answer = result_file.read_text(encoding='utf-8-sig')
+                    result_file.unlink()
                 else:
                     answer = input('Enter PASS only after the browser checks pass (anything else fails): ')
                 if answer.strip().lower() != 'pass':
@@ -128,6 +196,28 @@ def main():
                     print(f'Stored {len(stored)} observations. Latest stored source time: {stored[-1][0]}.', flush=True)
                     if options.fixture:
                         assert [json.loads(payload)['price'] for _, payload in stored] == [100, 102, 104, 101], stored
+                if options.replay:
+                    assert database.read_bytes() == snapshot, 'Replay changed the fixture database.'
+                    with closing(sqlite3.connect(database.resolve().as_uri() + '?mode=ro', uri=True)) as connection:
+                        count, = connection.execute('SELECT COUNT(*) FROM observations').fetchone()
+                    assert count == 6, count
+                    print('SQLite unchanged byte for byte. Observation count: 6.', flush=True)
+                if options.prompt9:
+                    assert restarted, 'Restart FastAPI before completing this check.'
+                    with closing(sqlite3.connect(database.resolve().as_uri() + '?mode=ro', uri=True)) as connection:
+                        assert connection.execute('SELECT COUNT(*) FROM paper_fills').fetchone() == (3,)
+                        assert connection.execute('SELECT COUNT(*) FROM paper_orders').fetchone() == (4,)
+                        assert connection.execute('SELECT name, window FROM chart_indicators ORDER BY id').fetchall() == [
+                            ('Range 2', 2), ('Range 3', 3),
+                        ]
+                        rows = connection.execute(
+                            'SELECT cash, shares, realized, unrealized, total FROM paper_pnl ORDER BY id'
+                        ).fetchall()
+                        assert [tuple(map(Decimal, row)) for row in rows] == [
+                            (600, 4, 0, 0, 0), (600, 4, 0, 40, 40), (710, 3, 10, 30, 40),
+                            (710, 3, 10, -15, -5), (1025, 0, 25, 0, 25),
+                        ], rows
+                    print(f'SQLite confirmed 3 fills, 4 orders, 2 indicators, and P&L {rows}.', flush=True)
                 print('PASS: HTTP checks and browser observation completed.', flush=True)
                 return 0
             except (Exception, KeyboardInterrupt) as error:

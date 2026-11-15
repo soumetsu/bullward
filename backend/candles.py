@@ -47,6 +47,9 @@ def load_minute_candles(
 
 def load_observed_minutes(
     db_path: Path, ticker: str, *, as_of: datetime | None = None,
+    received_from: datetime | None = None,
+    through_id: int = 9_223_372_036_854_775_807,
+    at_id: int = 9_223_372_036_854_775_807,
 ) -> tuple[list[CandleMinute], int | None]:
     """Return candles and the most recent effective source timestamp in milliseconds."""
     cutoff = as_of if as_of is not None else datetime.now(UTC)
@@ -66,13 +69,19 @@ def load_observed_minutes(
         rows = connection.execute(
             """WITH known AS (
                    SELECT id, source_time_ms, received_at_utc, source_message_json, revision_of_id
-                   FROM observations WHERE source = ? AND ticker = ? AND received_at_utc <= ?
+                   FROM observations WHERE source = ? AND ticker = ?
+                       AND received_at_utc >= ? AND (received_at_utc, id) <= (?, ?)
+                       AND id <= ?
                        AND source_time_ms <= ?
                )
                SELECT source_time_ms, source_message_json FROM known
                WHERE id NOT IN (SELECT revision_of_id FROM known WHERE revision_of_id IS NOT NULL)
                ORDER BY source_time_ms, received_at_utc, id""",
-            (SOURCE, ticker, cutoff.isoformat(timespec="microseconds"), int(cutoff.timestamp() * 1000)),
+            (
+                SOURCE, ticker, received_from.isoformat(timespec="microseconds") if received_from else "",
+                cutoff.isoformat(timespec="microseconds"), at_id, through_id,
+                int(cutoff.timestamp() * 1000),
+            ),
         )
         for minute, observations in groupby(rows, key=lambda row: row[0] // MINUTE_MS):
             prices = []

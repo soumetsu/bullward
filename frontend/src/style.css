@@ -62,3 +62,33 @@ tr.selected { background: #edf6f0; }
 .error { color: #9b3d32; }
 @media (max-width: 950px) { .analysis-grid { grid-template-columns: 1fr; } .price-grid { grid-template-columns: repeat(4, 1fr); } .summary-card { padding: 16px; } }
 @media (max-width: 650px) { .app-header { padding: 0 18px; height: 64px; } .workspace-label { display: none; } main { padding: 25px 14px; } .page-heading { align-items: flex-start; flex-direction: column; } h1 { font-size: 28px; } .summary-grid { grid-template-columns: 1fr; gap: 10px; } .summary-card { gap: 5px; } .summary-card strong { font-size: 21px; } .panel-heading { padding: 16px; align-items: flex-start; } .chart-actions { flex-direction: column; gap: 6px; } .chart-footer { padding: 12px; font-size: 10px; } th, td { padding: 12px 14px; } dd { font-size: 21px; } .inspector { padding: 20px; } }
+.app-header nav { display: flex; flex-wrap: wrap; gap: 14px; }
+.app-header nav a { color: inherit; }
+.app-header nav a[aria-current="page"] { font-weight: 700; }
+.replay-controls { margin-bottom: 22px; padding: 18px 22px; }
+.replay-controls p { margin: 0 0 10px; }
+.replay-controls form, .replay-progress { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; }
+.replay-controls label { display: grid; gap: 5px; font-size: 13px; }
+.replay-controls input { font: inherit; border: 1px solid #d3ded5; border-radius: 6px; padding: 10px; background: #f8faf7; color: #284c3f; }
+.replay-controls button { min-height: 40px; }
+.replay-controls button:disabled { opacity: .55; cursor: default; }
+.replay-progress { margin: 14px 0 10px; align-items: center; }
+.replay-progress dl { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 0; font-size: 13px; }
+.replay-progress dd { margin: 4px 0 0; font-size: 13px; }
+.tool-panel { padding: 18px 22px; margin-bottom: 20px; }
+.tool-panel h2, .tool-panel h3 { margin: 0 0 10px; }
+.tool-panel h3 { margin-top: 20px; }
+.tool-form, .paper-balances, .indicator-legend, .saved-indicators { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: end; }
+.tool-form + .tool-form { margin-top: 14px; }
+.tool-form label, .book-picker { display: grid; gap: 5px; font-size: 13px; }
+.book-picker { width: max-content; max-width: 100%; }
+.tool-form input { max-width: 175px; min-height: 39px; font: inherit; padding: 7px 9px; border: 1px solid #d3ded5; border-radius: 6px; background: #f8faf7; color: #284c3f; }
+.tool-panel button:disabled { opacity: .55; cursor: default; }
+.saved-indicators { padding-left: 19px; }
+.paper-balances dd, .indicator-values dd { margin: 3px 0 0; }
+.paper-balances { gap: 16px 44px; }
+.indicator-values { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.indicator-values dd { font-size: 17px; }
+.indicator-legend { padding: 10px 14px; align-items: center; font-size: 13px; }
+.sma-short { color: #385bbc; }
+.sma-long { color: #ad5920; }

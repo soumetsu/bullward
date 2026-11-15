@@ -56,6 +56,18 @@ The history and WebSocket routes both call the same aggregation. One-, five-, fi
 
 Each bucket uses the first open, maximum high, minimum low, and last close. The volume sums available minutes when each contributing minute has known volume. Coverage counts and the interval end flag travel beside the six candle fields. An ended interval can still change as late observations and corrections arrive. The source timestamp reports the latest effective observation, which can be outside the regular-session chart. The synthetic CSV remains available through the unparameterized history route and its labeled browser view.
 
+## Recorded session replay (Prompt 9)
+
+The Replay view lists symbols from SQLite and selects a UTC receipt range. The API reads one observation at a time in `received_at_utc, id` order and fixes the maximum selected row ID on the first step. Rows added later appear in a new run. Each step sends its original source timestamp, recorded receipt timestamp, and the chart as of that receipt and row ID. The one-minute and timeframe calculators are shared with live history. Late observations and revisions change their original candle only once their receipt is reached. Replay uses read-only SQLite connections and the browser never opens a live socket in Replay mode. With the live feed disabled, FastAPI opens no Yahoo connection and skips initialization of an existing store.
+
+## Indicators and the paper account (Prompts 9A–9D)
+
+Indicator calculations receive the current chart's ordered UTC candles with their completion flags and validated settings. A Python registry entry supplies the label, units, and a function over a trailing window of completed candles. SMA returns average close in price units, and rolling range returns maximum high minus minimum low in price units. The shared adapter returns a value or a gap at each chart timestamp, including on unfinished candles. The SMA pair compares exact rational averages and carries the prior side across ties. Vue draws the SMA lines and crossover markers and exposes values of saved indicators in the candle inspector. Additional named instances use the same registry and keep independent settings in SQLite.
+
+The paper account runs in the observation database. Its live AAPL account and each replay run start at $1,000 with separate orders, fills, and valuations. One Python submission function handles buy, sell, close, hold, and wait. The request ID is unique within an account, and conflicting reuse is rejected. Live matching considers recorded observations after the order's receipt and row ID fence. Replay advances the account with the next server-selected observation, with the cursor, fills, balance, position, and fill P&L committed together. A retry at the same observation is idempotent. Plain replay remains read-only.
+
+Cash and cost basis use decimal arithmetic. A sale deducts its proportional basis, and a full sale removes the remaining basis. Each fill writes a P&L snapshot. The first usable completed one-minute close after the latest account event supplies a valuation, with one saved row per completed candle and no rewrites of historical rows. The candle-end timestamp represents the close price time. The browser displays historical replay accounts separately from the live paper account.
+
 ## Future integration flow
 
 ```text
@@ -92,7 +104,7 @@ AI assistance, options workflows, and automation may be added to Python applicat
 
 ## What exists today
 
-The Vue workspace has a Yahoo Finance dashboard and a labeled synthetic chart. The Vite proxy carries HTTP and WebSocket traffic, and FastAPI serves health, history, and candle changes. Lightweight Charts 5.2.1 displays price with aligned volume, while the inspector and table show exact values. The Yahoo Finance receipt command and one-minute calculator remain available in the terminal. Indicators, AI advising, automation, option chains, IV, and alert/order suggestions remain future work. User-stated direction for those features is in `docs/user_preferences.md`.
+The Vue workspace has a Yahoo Finance dashboard, a labeled synthetic chart, recorded-session replay, configurable indicators, and simulated orders with P&L history. The Vite proxy carries HTTP and WebSocket traffic. Lightweight Charts 5.2.1 displays price with aligned volume, while the inspector and table show exact values. The Yahoo Finance receipt command and one-minute calculator remain available in the terminal. AI advising, automation, option chains, IV, and alerts remain future work. User-stated direction for those features is in `docs/user_preferences.md`.
 
 ## Open design decisions
 

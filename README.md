@@ -2,7 +2,7 @@
 
 ## Overview
 
-Project 4 Invest is a local investing and trading project for its owner and other people interested in trading. The current app displays AAPL price and volume candles from recorded Yahoo Finance observations using TradingView Lightweight Charts. AI advising, an automated trading bot, indicators, option chains, suggested alerts, and stop-loss/take-profit assistance are future goals. See `docs/user_preferences.md` for choices stated by the owner in chat.
+Project 4 Invest is a local investing and trading project for its owner and other people interested in trading. The app displays price and volume candles, moving averages, saved indicators, and a simulated account with order and P&L history. AI advising, automation, option chains, and alerts remain future goals. See `docs/user_preferences.md` for choices stated by the owner in chat.
 
 ## Goals
 
@@ -55,6 +55,7 @@ Project 4 Invest/
 │   ├── candles.py
 │   ├── live_feed.py
 │   ├── observations.py
+│   ├── replay.py
 │   ├── timeframes.py
 │   ├── requirements.txt
 │   ├── yahoo_stream.py
@@ -72,6 +73,7 @@ Project 4 Invest/
 │       ├── chartData.test.js
 │       ├── style.css
 │       ├── components/CandleChart.vue
+│       ├── components/ReplayControls.vue
 │       └── main.js
 ├── docs/
 │   ├── design-pipeline.md
@@ -81,6 +83,7 @@ Project 4 Invest/
 ├── scripts/
 │   ├── check_minute_candles.py
 │   ├── check_observation_storage.py
+│   ├── check_replay.py
 │   ├── check_timeframes.py
 │   ├── smoke_live_backend.py
 │   └── smoke_test.py
@@ -173,6 +176,27 @@ Each result contains a six-field `candle` with the UTC minute start, open, high,
 
 Run `python -m scripts.check_minute_candles` for the disposable storage and calculation test and `python -m scripts.check_timeframes` for the higher-timeframe and calendar checks.
 
-## Next setup decisions
+## Replay a recorded session
 
-Prompt 9 covers replaying recorded observations. The options and automation workflows can be defined when their source and execution requirements are known.
+Set `$env:INVEST_LIVE_FEED = '0'` in the backend terminal, then restart FastAPI using the command above. Open **Replay** from the dashboard header. Choose a saved symbol, a timeframe, and the UTC receipt range. The start is inclusive and the end is exclusive. Select **Start replay** to see the first observation, then **Next observation** to step manually or **Play** to advance at a fixed pace. The controls display both the observation's original market timestamp and when the recorder received it.
+
+Replay reads the saved session without changing it. The chart uses only observations in the selected receipt range, so include a preceding minute if its cumulative volume is needed to calculate the first candle's volume. Candle timestamps still follow market time and the same regular-session calendar as the live chart.
+
+Run `python -m scripts.check_replay` for the backend check and `python scripts/smoke_test.py --replay` for the browser and SQLite check against a separate constructed recording.
+
+## Indicators and paper account
+
+Use **Apply SMA windows** to set the short and long windows. The chart draws both averages and marks confirmed crossovers. Select a candle to inspect the values. **Add indicator** saves a named SMA or rolling price range and its window in SQLite. All indicators use completed candles.
+
+Open **Paper account** to see the live AAPL paper account. In a recorded session, pause **Replay** to submit orders against that run's separate paper account. Each account starts with $1,000. A buy, sell, or close stays pending until the next eligible stored price for the symbol. The simulator fills at that price with zero fees and rechecks available cash and shares. Hold and wait leave the account as it is. Use the account selector to reopen the order and P&L history of any replay that has orders.
+
+The P&L table records fills and completed regular-session one-minute candle valuations while shares are held. Realized and unrealized P&L use weighted average purchase cost. The event and price times are shown in UTC. The paper-account balance is simulated. Existing replay observations remain read-only.
+
+Run `python -m scripts.check_prompt9` for the calculations and `python scripts/smoke_test.py --prompt9` for the browser workflow with a disposable SQLite database and the live feed disabled:
+
+1. Play **SMA** with windows 2 and 3. Reset the chart view and check the upward marker at 14:34 UTC and the downward marker at 14:36 UTC.
+2. Play **RANGE**. Add **Range 2** and **Range 3** as rolling price ranges. Select 14:32 UTC and compare 5 and 6. Submit a window of zero to check the validation message. Refresh and verify that both valid settings return.
+3. Start **AAPL**. Buy 4 at the first frame and advance once to fill at $100. Advance through 14:32:05 UTC and sell 1, then advance once to fill at $110. Advance through 14:33:01 UTC and close the position, then advance once to fill at $105. Try to sell one more share and verify the rejection.
+4. Check **P&L history**, then create the empty `restart` file in the printed fixture directory. The runner resends the first request and restarts FastAPI. Open **Paper account**, select the saved AAPL replay, and compare the history again. Write PASS to the printed result file after the check.
+
+Prompt 10 covers requesting a decision about a completed candle.

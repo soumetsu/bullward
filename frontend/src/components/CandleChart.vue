@@ -1,18 +1,54 @@
 <script setup>
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { CandlestickSeries, HistogramSeries, createChart } from 'lightweight-charts'
+import { CandlestickSeries, HistogramSeries, LineSeries, createChart, createSeriesMarkers } from 'lightweight-charts'
 import { DOWN_COLOR, UP_COLOR, toChartData, utcTime } from '../chartData'
 
-const props = defineProps({ rows: { type: Array, required: true }, selected: { type: String, default: '' } })
+const props = defineProps({
+  rows: { type: Array, required: true },
+  selected: { type: String, default: '' },
+  indicators: { type: Object, required: true },
+})
 const emit = defineEmits(['select'])
 const host = ref(null)
 let chart, priceSeries, volumeSeries
+let markers
+const lines = new Map()
 let byTime = new Map()
 function showSelection(timestamp) {
   const row = byTime.get(Date.parse(timestamp) / 1000)
   if (row) chart?.setCrosshairPosition(row.close, row.time, priceSeries)
 }
 function resetView() { chart?.timeScale().fitContent() }
+function showIndicators() {
+  if (!chart) return
+  const active = new Set()
+  for (const item of props.indicators.series) {
+    if (item.type !== 'sma') continue
+    active.add(item.id)
+    if (!lines.has(item.id)) {
+      const color = item.id === 'short' ? '#385bbc' : item.id === 'long' ? '#ad5920' : '#7052a8'
+      lines.set(item.id, chart.addSeries(LineSeries, {
+        color, lineWidth: 2, priceLineVisible: false, lastValueVisible: false,
+      }, 0))
+    }
+    lines.get(item.id).setData(item.points.map(({ timestamp, value }) => ({
+      time: Date.parse(timestamp) / 1000, ...(value === null ? {} : { value }),
+    })))
+  }
+  for (const [id, line] of lines) {
+    if (!active.has(id)) {
+      chart.removeSeries(line)
+      lines.delete(id)
+    }
+  }
+  markers.setMarkers(props.indicators.crossovers.map(({ timestamp, direction }) => ({
+    time: Date.parse(timestamp) / 1000,
+    position: direction === 'up' ? 'belowBar' : 'aboveBar',
+    shape: direction === 'up' ? 'arrowUp' : 'arrowDown',
+    color: direction === 'up' ? UP_COLOR : DOWN_COLOR,
+    text: direction === 'up' ? 'SMA up' : 'SMA down',
+  })))
+}
 function load(newRows, oldRows) {
   if (!chart) return
   const { candles, prices, volumes } = toChartData(newRows)
@@ -46,6 +82,7 @@ onMounted(() => {
   })
   priceSeries = chart.addSeries(CandlestickSeries, { upColor: UP_COLOR, downColor: DOWN_COLOR, borderVisible: false, wickUpColor: UP_COLOR, wickDownColor: DOWN_COLOR,
     priceFormat: { type: 'price', precision: 2, minMove: 0.01 } }, 0)
+  markers = createSeriesMarkers(priceSeries)
   volumeSeries = chart.addSeries(HistogramSeries, { priceFormat: { type: 'volume' }, lastValueVisible: false, priceLineVisible: false }, 1)
   chart.panes()[0].setStretchFactor(3)
   chart.panes()[1].setStretchFactor(1)
@@ -53,9 +90,11 @@ onMounted(() => {
   chart.subscribeCrosshairMove(select)
   chart.subscribeClick(select)
   load(props.rows)
+  showIndicators()
 })
 watch(() => props.rows, load)
 watch(() => props.selected, showSelection)
+watch(() => props.indicators, showIndicators)
 onBeforeUnmount(() => chart?.remove())
 defineExpose({ resetView })
 </script>

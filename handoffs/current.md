@@ -1,10 +1,10 @@
 # Current project state
 
-Updated: 2026-11-12
+Updated: 2026-11-15
 
 ## Current handoff
 
-The repository is on `main`. The session started from a clean working tree at `e7a6efd` (Prompt 7). Prompt 8 changes are available for review. The sections below that precede Prompt 8 describe earlier sessions.
+The repository is on `main`. Prompt 8 was pushed to `origin/main` as `dc1ef87`. Prompts 9 and 9A–9D are implemented in the working tree for review. The numbered sections below preserve each session's record.
 
 ## Project and root
 
@@ -91,3 +91,19 @@ Implemented the timeframe prerequisite from Prompt 7A and the AAPL dashboard fro
 The real Yahoo smoke mode opened the subscription but received zero observations overnight. The browser showed “Waiting for a price” and then “Upstream disconnected · retrying” while “Dashboard socket · Connected” remained visible. The runner exited 1 because the real-price comparison was pending. Both smoke runs stopped their own services. See `docs/verification.md` for commands, values, and sandbox failures.
 
 Next task: rerun `python scripts/smoke_test.py --live` during a regular session and compare a stored Yahoo update with the displayed candle. Prompt 9 is the next implementation prompt when requested. Review the working tree before committing.
+
+## Prompt 9 — 2026-11-15
+
+`backend/replay.py` and the FastAPI replay routes list recorded symbols, select a UTC receipt range, and return replay steps in receipt and row ID order. `backend/candles.py` uses the same one-minute calculation with a receipt and row cutoff. `frontend/src/components/ReplayControls.vue` adds symbol and time-range selection, stepping, playback, and source and receipt timestamps to the existing chart. README documents how to restart with `INVEST_LIVE_FEED=0`. The original Prompt 9 remains under `prompts/prompts/`. No dependencies changed.
+
+`python -m scripts.check_replay` and `python scripts/smoke_test.py --replay` passed with a separate six-row constructed store. Two replays returned the same final 14:31 UTC close of 103 and volume of 20. The store stayed byte-for-byte identical. The first browser attempt timed out and passed on rerun with a longer confirmation window. The existing minute, timeframe, storage, adapter, build, and live-fixture checks also passed. [Verification](../docs/verification.md)
+
+The Yahoo retry opened its socket on Sunday, sent the subscription, and received zero updates before its 30-second timeout. Next verification task: run `python scripts/smoke_test.py --live` during a regular session and check the replay view against an actual captured session. Next implementation prompt when requested: Prompt 9A. Prompt 9 awaits review before commit.
+
+## Prompts 9A–9D
+
+`backend/indicators.py` implements SMA, exact crossover comparison, and a registry with SQLite-backed named indicator settings. `backend/paper.py` implements simulated execution, separate live/replay accounts, transactional fills, weighted-cost accounting, and P&L history. FastAPI routes serve both features. Vue adds indicator controls, chart overlays and markers, a paper-account page, and replay orders. `scripts/check_prompt9.py` and `scripts/smoke_test.py --prompt9` verify the workflows. The supplied prompts remain in `prompts/prompts/`. No dependencies changed.
+
+The offline browser smoke test passed with both markers, persisted Range 2/3, five expected P&L rows, three fills, one rejected order, and an unchanged history after a backend restart and an HTTP retry. Initial checks hit decimal string comparison and the browser confirmation timeout. Both passed after correction. The development dashboard on port 5175 and FastAPI on port 8001 are running with the new code. The indicator and paper endpoints returned HTTP 200 through Vite. See `docs/verification.md` for the full results.
+
+Next implementation prompt when requested: Prompt 10. The working tree awaits review. The market-hours Yahoo quote check and replay of a real capture remain pending.

@@ -243,3 +243,70 @@ Browser comparisons for **constructed smoke test data** on Nov 9, 2026, in UTC:
 | Open `/?source=sample` and choose 14:31 UTC | The synthetic label and three rows appeared. The inspector showed O102 H104 L100 C101 and 850 shares. |
 
 Both smoke runners cleaned up their temporary services and databases. The repeatable checks are `python scripts/smoke_test.py --fixture` and `python scripts/smoke_test.py --live`. No source edits are required to trigger the fixture updates or disconnect.
+
+## Prompt 8 follow-up and Prompt 9 — 2026-11-15
+
+Pushed the reviewed Prompt 8 change as `dc1ef87` to `origin/main`. The first stage attempt hit the sandbox's protected Git index. The escalated stage passed, but Git lacked a configured author. The commit used the previous commit's GitHub noreply identity as a one-command override. The push succeeded.
+
+Rechecked Windows 10.0.26200.0, Python 3.14.8, pip 26.2.1, SQLite 3.50.4, Node 24.21.0, npm 11.19.0, pnpm 11.25.0, Corepack 0.36.0, and the current Python and frontend dependencies. `python -m pip check` passed. No packages, manifests, or lockfiles changed.
+
+| Check | Expected | Observed |
+|---|---|---|
+| `python -m scripts.check_minute_candles`, `python -m scripts.check_timeframes`, `python -m scripts.check_observation_storage` | Existing candle, calendar, and SQLite restart checks pass | All passed. The storage check used the previously verified outside-sandbox path. |
+| `node --test frontend/src/chartData.test.js` and `npm run build` in `frontend/` | UTC adapter tests and production bundle pass | Both tests passed. Vite built 22 modules with Replay. |
+| `python -m backend.yahoo_stream AAPL --timeout 30 --db backend/data/invest-sunday-check.sqlite3` | Retry receipt of a real observation | The Yahoo socket opened and sent the AAPL subscription. It timed out after 30 seconds early Sunday Eastern time and created no database. Prompt 8's live quote-to-candle check remains pending during a regular session. |
+| `python -m scripts.check_replay` | Verify receipt order, tied receipts, late arrivals, revision, empty range, and repeatability | Six frames replayed in order. Both result sequences and every stored row matched. |
+| `python scripts/smoke_test.py --replay --no-open --browser-timeout 2700 --browser-result-file .smoke-replay-retry.txt` | Start FastAPI with Yahoo off and compare two browser replays with the separate SQLite fixture | Passed. Both runs ended with identical chart rows. The test store had six observations and was byte-for-byte identical before and after. |
+| `python scripts/smoke_test.py --fixture --no-open --browser-timeout 2700 --browser-result-file .smoke-fixture-retry.txt` | Preserve Prompt 8's candle update, rollover, interval switching, and disconnect behavior | Passed. SQLite held the same four constructed observations as in the earlier smoke check. The dashboard socket remained connected when the fixture upstream disconnected. |
+
+The initial browser launch outlasted the 600-second confirmation deadline. Both initial runners exited 1 and cleaned up their services. Added a configurable confirmation timeout and reran both checks with a longer window. The browser automation also timed out when filling zero seconds in a date field because the browser normalized the value to minutes. Filling the native field with the normalized value succeeded.
+
+Replay browser results for the labeled constructed AAPL recording on Nov 9, 2026:
+
+| Observation and receipt in UTC | 14:31 candle in the browser |
+|---|---|
+| Source 14:32:05, receipt 14:32:06, before the late trade | O102 H104 L102 C104, volume 18 from 1018 − 1000 |
+| Late source 14:31:25, receipt 14:32:10 | O102 H108 L102 C104, volume 18 |
+| Correction to source 14:31:45, also received at 14:32:10 | O102 H108 L102 C103, volume 20 from 1020 − 1000 |
+| Restarted the same range and played through | Same candles, values, and final observation timestamps |
+| Requested 15:00–15:01 by UTC receipt | “No recorded observations in this range.” |
+
+The default observation store contained zero rows. Replay against an actual Yahoo session remains pending until a capture exists. The browser SmokeTest command is `python scripts/smoke_test.py --replay`.
+
+## Prompts 9A–9D
+
+Used the existing Python 3.14.8, SQLite, FastAPI, Node 24.21.0, npm 11.19.0, Vue 3.5.45, Vite 8.3.7, and Lightweight Charts 5.2.1. No dependency or manifest changes.
+
+### Indicators
+
+`python -m scripts.check_prompt9` compared every completed prefix of the constructed replay against the full Python calculation and verified that the forming candle had gaps and no signal. For the seven closes 13, 10, 7, 13, 19, 7, 1:
+
+| UTC candle start | Short (2) | Long (3) | Signal |
+|---|---:|---:|---|
+| 14:30 | — | — | — |
+| 14:31 | 11.5 | — | — |
+| 14:32 | 8.5 | 10 | — |
+| 14:33 | 10 | 10 | — |
+| 14:34 | 16 | 13 | Up |
+| 14:35 | 13 | 13 | — |
+| 14:36 | 4 | 9 | Down |
+
+Both markers appeared on the browser chart. The candle inspector showed 16/13 and 4/9 when selected. On the RANGE fixture, the third candle showed Range 2 = 5 and Range 3 = 6. A zero window showed “The indicator window must be a positive whole number.” Both saved configurations returned after refresh and SQLite held exactly those two rows.
+
+### Paper orders and P&L
+
+The constructed AAPL replay started with $1,000. The browser showed pending orders followed by fills linked to observations 17, 20, and 23. Hold and wait produced no orders. The sale from the empty position was recorded as rejected. An HTTP retry of the first buy returned order #1 again. After FastAPI restarted, a direct SQLite read verified the same three fills, four orders, and five valuation rows. The archived browser account displayed the same balance and history before and after restart.
+
+| Event | Cash | Shares | Realized | Unrealized | Total |
+|---|---:|---:|---:|---:|---:|
+| Buy 4 at $100 | $600 | 4 | $0 | $0 | $0 |
+| Value at $110 | $600 | 4 | $0 | $40 | $40 |
+| Sell 1 at $110 | $710 | 3 | $10 | $30 | $40 |
+| Value at $95 | $710 | 3 | $10 | −$15 | −$5 |
+| Close 3 at $105 | $1,025 | 0 | $25 | $0 | $25 |
+
+The first numerical assertion compared stored decimal spellings and rejected equivalent values such as `40.0` and `40`. Comparing decimals fixed the check. The first browser harness timed out while awaiting the remaining operations, and a separate local HTTP retry attempt was blocked in the sandbox. The rerun moved the retry into the smoke harness and used a longer confirmation window. `python scripts/smoke_test.py --prompt9 --no-open --browser-timeout 14400 --browser-result-file .smoke-prompt9-result.txt` exited 0 and removed its temporary database and services. The documented interactive command is `python scripts/smoke_test.py --prompt9`.
+
+The final `python -m scripts.check_prompt9` also passed live matching with constructed prices. A pending order ignored pre-submission observations, two buy prices produced average cost 110, a partial sale realized 15 and left 45 unrealized, and the matcher rejected fractional quantity, insufficient cash, and a second sale exceeding the remaining position. Existing replay, minute candle, timeframe, SQLite restart, and chart adapter checks passed. Vite built 25 modules successfully, and `git diff --check` passed.
+
+The sandbox blocked the process inventory check used to identify the running development backend. The outside-sandbox restart verified ownership by the listener's command line and left the development services running. FastAPI health on port 8001 and the frontend, indicators, and paper endpoints through Vite on port 5175 each returned HTTP 200.
