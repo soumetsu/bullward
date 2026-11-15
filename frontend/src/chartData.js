@@ -10,7 +10,8 @@ export function toChartData(rows) {
   const candles = rows.map((row) => {
     const time = Date.parse(row.timestamp) / 1000
     if (!row.timestamp?.endsWith('Z') || !Number.isInteger(time) || time % 60 !== 0) throw new Error('Each candle must start on a UTC minute.')
-    if (!['open', 'high', 'low', 'close', 'volume'].every((key) => Number.isFinite(row[key]))) throw new Error('Prices and volume must be numeric.')
+    if (!['open', 'high', 'low', 'close'].every((key) => Number.isFinite(row[key])) ||
+        (row.volume !== null && !Number.isFinite(row.volume))) throw new Error('Prices must be numeric. Volume must be numeric or null.')
     if (row.volume < 0 || row.low > Math.min(row.open, row.close) || row.high < Math.max(row.open, row.close)) throw new Error('History contains an invalid price range or volume.')
     return { ...row, time }
   }).sort((a, b) => a.time - b.time)
@@ -18,6 +19,8 @@ export function toChartData(rows) {
   return {
     candles,
     prices: candles.map(({ time, open, high, low, close }) => ({ time, open, high, low, close })),
-    volumes: candles.map(({ time, open, close, volume }) => ({ time, value: volume, color: close >= open ? UP_COLOR : DOWN_COLOR })),
+    volumes: candles.map(({ time, open, close, volume }) => volume === null
+      ? { time }
+      : { time, value: volume, color: close >= open ? UP_COLOR : DOWN_COLOR }),
   }
 }

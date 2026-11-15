@@ -13,13 +13,25 @@ function showSelection(timestamp) {
   if (row) chart?.setCrosshairPosition(row.close, row.time, priceSeries)
 }
 function resetView() { chart?.timeScale().fitContent() }
-function load() {
+function load(newRows, oldRows) {
   if (!chart) return
-  const { candles, prices, volumes } = toChartData(props.rows)
+  const { candles, prices, volumes } = toChartData(newRows)
   byTime = new Map(candles.map((row) => [row.time, row]))
-  priceSeries.setData(prices)
-  volumeSeries.setData(volumes)
-  resetView()
+  // A change at the latest timestamp can be applied without resetting the viewport.
+  const tail = oldRows ? oldRows.length - 1 : -1
+  const canUpdate = tail >= 0 && newRows.length >= oldRows.length &&
+    newRows[tail].timestamp === oldRows[tail].timestamp &&
+    oldRows.slice(0, tail).every((row, index) => row === newRows[index])
+  if (canUpdate) {
+    for (let index = tail; index < prices.length; index++) {
+      priceSeries.update(prices[index])
+      volumeSeries.update(volumes[index])
+    }
+  } else {
+    priceSeries.setData(prices)
+    volumeSeries.setData(volumes)
+    if (!oldRows?.length) resetView()
+  }
   showSelection(props.selected)
 }
 onMounted(() => {
@@ -40,7 +52,7 @@ onMounted(() => {
   const select = ({ time }) => { const row = byTime.get(time); if (row) emit('select', row.timestamp) }
   chart.subscribeCrosshairMove(select)
   chart.subscribeClick(select)
-  load()
+  load(props.rows)
 })
 watch(() => props.rows, load)
 watch(() => props.selected, showSelection)
@@ -49,7 +61,7 @@ defineExpose({ resetView })
 </script>
 
 <template>
-  <div ref="host" class="chart-canvas" role="img" aria-label="Synthetic one-minute candlesticks with aligned volume below. Use the candle inspector or data table for exact values."></div>
+  <div ref="host" class="chart-canvas" role="img" aria-label="Candlesticks with aligned volume below. Use the candle inspector or data table for exact values."></div>
 </template>
 <style scoped>
 .chart-canvas { width: 100%; height: 440px; }

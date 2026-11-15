@@ -217,3 +217,29 @@ Run `python -m scripts.check_minute_candles` from the project root. It builds a 
 The original check could not open its database in the sandbox's system temp directory. Moved the disposable test directory under `backend/data/`. The rerun passed all ten comparisons and removed its test database. One correction cycle.
 
 `python -m backend.candles aapl --as-of 2026-11-09T15:01:00Z` returned `[]` as expected for the empty default store. `python -m scripts.check_observation_storage` passed the recorder restart check. The synthetic `history()` fixture still returned three candles and 850 shares for the middle row. No UI changed in this prompt.
+
+## Prompt 8 and timeframe prerequisite — 2026-11-12
+
+Resumed from clean `main` at `e7a6efd`. The handoff's earlier Git and next-task entries predate the current repository and chat direction. Checked Windows, Python 3.14.8, pip 26.2.1, Node 24.21.0, npm 11.19.0, pnpm 11.25.0, Corepack 0.36.0, and the frontend lock and package tree. The installed Python packages include yfinance 1.8.0, websockets 17.4, and tzdata 2026.6. The existing frontend and Python packages were sufficient. `python -m pip check` reported no broken requirements. The default observation store was empty.
+
+| Check | Expected | Observed |
+|---|---|---|
+| `python -m scripts.check_timeframes` | Sample 5m at 14:30 UTC has O100 H105 L99 C104 V3550. Report 3/5 minutes and daily 3/390 as forming at 14:33 UTC. | Both matched. A constructed 14:35 minute started a new 5m candle and stayed in the same daily candle. Nov 10 started a new daily candle. Known zero and unknown volume remained distinct. The holiday, daylight saving transition, and early-close hourly bucket matched. |
+| `python -m scripts.check_minute_candles` | Preserve all 10 comparisons for order, volume, revisions, and cutoff. | All passed. |
+| `python -m scripts.check_observation_storage` | Restart reopens the same five rows and suppresses the repeated frame. | Passed outside the sandbox. In the sandbox the system temp database was inaccessible, and the workspace-temp retry stalled in the recorder subprocess. |
+| `node --test frontend/src/chartData.test.js` and `npm run build` in `frontend/` | Existing UTC conversion and validation pass and production bundle builds. | 2 tests passed. Vite built 21 modules. |
+| `python scripts/smoke_test.py --fixture --no-open --browser-result-file .smoke-fixture-outside.txt` | Start both services, receive constructed observations, update and roll over a candle, switch timeframe, distinguish upstream loss, and check SQLite. | Exited 0 outside the sandbox, with browser and database results below. The first run in the sandbox timed out waiting for backend health and stopped its child process. |
+| `python scripts/smoke_test.py --live --no-open --browser-result-file .smoke-live-result.txt` | Follow a real Yahoo price from SQLite into the browser. Disconnect the upstream feed with the page open. | Subscribed outside the sandbox overnight. Zero observations arrived. Browser showed AAPL, Yahoo Finance, no observations, and “Waiting for a price.” After upstream disconnect it showed “Upstream disconnected · retrying” and “Dashboard socket · Connected.” Switching to 15 minutes loaded the matching empty history. The runner received PENDING and exited 1. **Live quote-to-candle verification is pending.** |
+
+Browser comparisons for **constructed smoke test data** on Nov 9, 2026, in UTC:
+
+| Browser action | Observed |
+|---|---|
+| Open the 1m dashboard | Two rows. The 14:31 candle showed O102 H102 L102 C102, volume 10, and latest source time 14:31:05. |
+| Deliver the 14:31:35 observation | Same two rows. The 14:31 candle changed to O102 H104 L102 C104, volume 15. The dashboard showed “Receiving updates” and source time 14:31:35. SQLite row 3 held price 104 and day volume 1015, up 5 from the previous 1010. |
+| Deliver the 14:32:05 observation | Third candle at 14:32, O101 H101 L101 C101, volume 10. SQLite row 4 held price 101 and day volume 1025. |
+| Switch to 5m and then Daily | Each showed one 14:30 candle, O100 H104 L100 C101, volume Unknown. Daily showed 3 of 390 minutes observed. |
+| Disconnect the constructed upstream | The candle stayed visible. Feed status changed to “Upstream disconnected · retrying” with “Dashboard socket · Connected.” |
+| Open `/?source=sample` and choose 14:31 UTC | The synthetic label and three rows appeared. The inspector showed O102 H104 L100 C101 and 850 shares. |
+
+Both smoke runners cleaned up their temporary services and databases. The repeatable checks are `python scripts/smoke_test.py --fixture` and `python scripts/smoke_test.py --live`. No source edits are required to trigger the fixture updates or disconnect.

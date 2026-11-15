@@ -1,6 +1,10 @@
 # Current project state
 
-Updated: 2026-11-11
+Updated: 2026-11-12
+
+## Current handoff
+
+The repository is on `main`. The session started from a clean working tree at `e7a6efd` (Prompt 7). Prompt 8 changes are available for review. The sections below that precede Prompt 8 describe earlier sessions.
 
 ## Project and root
 
@@ -77,3 +81,13 @@ Added `backend/candles.py` to derive UTC one-minute candles from a read-only SQL
 `python -m scripts.check_minute_candles` passed ten comparisons using disposable constructed observations after moving its test directory into the workspace. The required 15:00 UTC candle returned 100 / 103 / 100 / 101 and volume 11 while open, after the minute ended, and after receiving the late observation. The storage restart check and the synthetic history fixture passed. See `docs/verification.md` for the full results. No dependencies or UI changes were needed.
 
 No checks or approvals are outstanding for Prompt 7. Next task when authorized: Prompt 7A, deriving larger timeframes from one-minute candles.
+
+## Prompt 8 and timeframe prerequisite — 2026-11-12
+
+Implemented the timeframe prerequisite from Prompt 7A and the AAPL dashboard from Prompt 8. `backend/timeframes.py` groups saved UTC minute candles into regular-session Nasdaq intervals using the published 2026 calendar. `backend/live_feed.py` reuses the Yahoo client and recorder. `backend/main.py` shares aggregation between history and the candle WebSocket. The Vue app now selects 1m, 5m, 15m, 1h, or daily and shows coverage, source age, forming status, and separate upstream and browser connection statuses. `/?source=sample` still shows the synthetic CSV. The original Prompt 8 is saved under `prompts/prompts/`. No dependencies or manifests changed.
+
+`python -m scripts.check_timeframes`, `python -m scripts.check_minute_candles`, `python -m scripts.check_observation_storage` (outside the sandbox), `node --test frontend/src/chartData.test.js`, and `npm run build` in `frontend/` passed. `python scripts/smoke_test.py --fixture` passed in agent-assisted browser mode after a sandbox startup timeout. The constructed records updated the 14:31 candle in place, added 14:32, and gave the expected five-minute and daily candles. The browser showed the upstream disconnect with its dashboard socket still connected.
+
+The real Yahoo smoke mode opened the subscription but received zero observations overnight. The browser showed “Waiting for a price” and then “Upstream disconnected · retrying” while “Dashboard socket · Connected” remained visible. The runner exited 1 because the real-price comparison was pending. Both smoke runs stopped their own services. See `docs/verification.md` for commands, values, and sandbox failures.
+
+Next task: rerun `python scripts/smoke_test.py --live` during a regular session and compare a stored Yahoo update with the displayed candle. Prompt 9 is the next implementation prompt when requested. Review the working tree before committing.

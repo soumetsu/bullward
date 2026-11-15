@@ -42,6 +42,20 @@ The read includes observations received by the requested time. A late observatio
 
 Volume uses changes in `day_volume` between successive effective observations, assigning each delta to the later observation's minute. An observation in the prior minute can provide the opening baseline. A missing baseline or counter, an intervening empty minute, or a counter decrease makes the affected minute's volume unknown (`null`). A subsequent minute can recover when a valid baseline is available. A reset is observable when the counter drops. Sparse observations may miss a reset that happens between samples.
 
+## Session timeframes and the dashboard (Prompts 7A–8)
+
+```text
+Yahoo Finance -> one AAPL subscription per FastAPI process -> SQLite
+  -> effective UTC minutes -> Nasdaq regular-session buckets
+  -> HTTP history or WebSocket snapshot and changes -> Vue chart, inspector, and table
+```
+
+FastAPI owns the subscription for the local dashboard. It stores valid observations before reporting receipt and retries after a timeout or transport failure. The browser socket carries the upstream status independently of its own connection state. Its first message is a history snapshot for the requested symbol and interval. Subsequent messages include changed candles, removed timestamps, the latest source timestamp, and feed status. A new snapshot on reconnect or interval change covers observations recorded while the browser was disconnected.
+
+The history and WebSocket routes both call the same aggregation. One-, five-, fifteen-, and sixty-minute buckets align to the 9:30 a.m. Eastern session open. Daily spans the session and uses the open as its timestamp. The last hourly bucket may be short. The current calendar is limited to Nasdaq regular sessions in 2026 and includes published holidays and early closes. The IANA Eastern timezone handles daylight saving time. [Nasdaq equity rules](https://listingcenter.nasdaq.com/assets/RuleBook/Nasdaq/rules/Nasdaq%20Equity%201.html) · [Nasdaq 2026 calendar](https://nasdaqtrader.com/Trader.aspx?id=Calendar)
+
+Each bucket uses the first open, maximum high, minimum low, and last close. The volume sums available minutes when each contributing minute has known volume. Coverage counts and the interval end flag travel beside the six candle fields. An ended interval can still change as late observations and corrections arrive. The source timestamp reports the latest effective observation, which can be outside the regular-session chart. The synthetic CSV remains available through the unparameterized history route and its labeled browser view.
+
 ## Future integration flow
 
 ```text
@@ -78,7 +92,7 @@ AI assistance, options workflows, and automation may be added to Python applicat
 
 ## What exists today
 
-The Vue chart workspace, Vite `/api` proxy, FastAPI health/history routes, CSV data, and dependencies are implemented. Lightweight Charts 5.2.1 draws three synthetic candles and their volume. The inspector and table show exact values, and the footer includes TradingView's attribution notice and links. The Yahoo Finance command receives one update and records it in SQLite. The backend can derive one-minute candles from those observations in the terminal. Live chart updates, indicators, AI advising, automation, option chains, IV, and alert/order suggestions remain future work. User-stated direction for those features is in `docs/user_preferences.md`.
+The Vue workspace has a Yahoo Finance dashboard and a labeled synthetic chart. The Vite proxy carries HTTP and WebSocket traffic, and FastAPI serves health, history, and candle changes. Lightweight Charts 5.2.1 displays price with aligned volume, while the inspector and table show exact values. The Yahoo Finance receipt command and one-minute calculator remain available in the terminal. Indicators, AI advising, automation, option chains, IV, and alert/order suggestions remain future work. User-stated direction for those features is in `docs/user_preferences.md`.
 
 ## Open design decisions
 

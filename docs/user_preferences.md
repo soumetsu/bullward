@@ -28,3 +28,4 @@ The owner has not yet specified the bot's strategy, brokerage/execution scope, a
 
 - Initial interview: investing/trading tool for personal and broader use; AI assistance, possible automation, options trading; Python/FastAPI/Vue; future reference images and prompts.
 - Prompt 4 follow-up: explicit bot, chart/indicator/option-chain workspace, advising and Decisions API, suggested price alerts and stop-loss/take-profit levels, and visible volume/IV/change/history context. Create this preference record and maintain it only from explicit choices typed in this chat. Complete Prompt 4 and stop after it.
+- 2026-11-12: resume the project after reviewing the project instructions and handoffs, and continue with Prompt 8.

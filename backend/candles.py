@@ -41,6 +41,14 @@ def load_minute_candles(
     db_path: Path, ticker: str, *, as_of: datetime | None = None,
 ) -> list[CandleMinute]:
     """Recompute candles from the versions received by the requested time."""
+    minutes, _ = load_observed_minutes(db_path, ticker, as_of=as_of)
+    return minutes
+
+
+def load_observed_minutes(
+    db_path: Path, ticker: str, *, as_of: datetime | None = None,
+) -> tuple[list[CandleMinute], int | None]:
+    """Return candles and the most recent effective source timestamp in milliseconds."""
     cutoff = as_of if as_of is not None else datetime.now(UTC)
     if cutoff.utcoffset() is None:
         raise ValueError("as_of must include a timezone")
@@ -52,22 +60,24 @@ def load_minute_candles(
     minutes: list[CandleMinute] = []
     previous_minute: int | None = None
     previous_total: int | None = None
+    latest_source_ms = None
     db_uri = db_path.resolve().as_uri() + "?mode=ro"
     with closing(sqlite3.connect(db_uri, uri=True)) as connection:
         rows = connection.execute(
             """WITH known AS (
                    SELECT id, source_time_ms, received_at_utc, source_message_json, revision_of_id
                    FROM observations WHERE source = ? AND ticker = ? AND received_at_utc <= ?
+                       AND source_time_ms <= ?
                )
                SELECT source_time_ms, source_message_json FROM known
                WHERE id NOT IN (SELECT revision_of_id FROM known WHERE revision_of_id IS NOT NULL)
                ORDER BY source_time_ms, received_at_utc, id""",
-            (SOURCE, ticker, cutoff.isoformat(timespec="microseconds")),
+            (SOURCE, ticker, cutoff.isoformat(timespec="microseconds"), int(cutoff.timestamp() * 1000)),
         )
         for minute, observations in groupby(rows, key=lambda row: row[0] // MINUTE_MS):
             prices = []
             volume: int | None = 0
-            for _, payload in observations:
+            for latest_source_ms, payload in observations:
                 message = json.loads(payload)
                 prices.append(float(message["price"]))
                 total = _session_volume(message.get("day_volume"))
@@ -89,7 +99,7 @@ def load_minute_candles(
                 "volume": volume,
             }
             minutes.append({"candle": candle, "ended": cutoff >= start + timedelta(minutes=1)})
-    return minutes
+    return minutes, latest_source_ms
 
 
 def main():

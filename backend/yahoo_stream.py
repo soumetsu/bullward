@@ -42,6 +42,18 @@ def parse_quote(message, ticker, received_at):
     return quote
 
 
+async def receive_quote(client, ticker):
+    # yfinance 1.8.0's listen() loops after a clean remote close.
+    while True:
+        frame = await client._ws.recv()
+        received_at = datetime.now(UTC)
+        encoded = json.loads(frame).get("message")
+        if encoded:
+            message = client._decode_message(encoded)
+            if quote := parse_quote(message, ticker, received_at):
+                return message, received_at, quote
+
+
 async def check_subscription(client, ticker, timeout, db_path=DEFAULT_DB_PATH):
     """Return 0 after recording a quote, 1 on failure, or 2 on subscription timeout."""
     opened = False
@@ -54,16 +66,7 @@ async def check_subscription(client, ticker, timeout, db_path=DEFAULT_DB_PATH):
                 await client.subscribe(ticker)
                 print(f"Subscription sent for {ticker}.", flush=True)
 
-                # yfinance 1.8.0's listen() loops even after a clean remote close.
-                # Read its subscribed socket directly so closure ends this check.
-                while True:
-                    frame = await client._ws.recv()
-                    received_at = datetime.now(UTC)
-                    encoded = json.loads(frame).get("message")
-                    if encoded:
-                        message = client._decode_message(encoded)
-                        if quote := parse_quote(message, ticker, received_at):
-                            break
+                message, received_at, quote = await receive_quote(client, ticker)
     except TimeoutError:
         print(f"Timed out after {timeout:g}s (connection opened: {opened}). Receipt unverified.", file=sys.stderr)
         return 2
