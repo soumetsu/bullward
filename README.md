@@ -246,3 +246,23 @@ Start FastAPI with `OPENAI_API_KEY` in its process environment and GPT-Live acce
 For a live check, ask “What did the agents decide for this symbol?” and then “What happened to the paper account?” in the same session. Compare both answers with the displayed record. For a skipped order or an analysis with no linked fill, check that the answer reflects the absence of a fill.
 
 Run `python -m scripts.check_voice` for the controlled backend check. Run `python scripts/smoke_test.py --voice` for the browser check with a local WebRTC peer and synthetic audio. Follow the runner instructions to test End voice and a disconnect on the filled decision, then open the two printed URLs for simulated signaling failure and denied microphone access. Check that each path leaves the microphone off before confirming the smoke test. [OpenAI WebRTC guide](https://developers.openai.com/api/docs/guides/voice-webrtc?voice-api=live)
+
+## Workstation SmokeTest
+
+Run the workstation smoke test from the project root.
+
+```powershell
+python -m scripts.smoke_test --workstation
+```
+
+The command starts FastAPI and Vite on temporary loopback ports and opens the Vue dashboard in an installed headless Chrome, Chromium, or Edge. It uses a disposable browser profile and SQLite database. Set `INVEST_SMOKE_BROWSER` to the browser executable if automatic discovery misses it. The test exits nonzero with the failure details and closes the browser and both servers.
+
+Replay supplies deterministic prices. The browser adds and edits a saved SMA, checks a successful and failed chart analysis, and steps through a complete paper automation run. A successful run finishes with three fills, $1,025 cash, zero shares, $25 realized, and $0 unrealized. The runner compares the dashboard with SQLite and checks exact duplicate intake, the reviewer veto, and Stop. The push workflow runs the same command using the browser supplied by the GitHub-hosted runner and the project's declared dependencies.
+
+The test sets `INVEST_PAPER_ORDER_SIZE=4` for buys and `INVEST_PAPER_SELL_SIZE=1` for partial sales. For the regular app, when the sell setting is unset, it uses `INVEST_PAPER_ORDER_SIZE`. A close sells the entire remaining position. To edit an existing indicator, use **Edit window** next to the saved indicator and select **Save window**.
+
+Run these checks separately for live providers.
+
+- Yahoo prices and saved candles use `python scripts/smoke_test.py --live` during a regular market session.
+- The image model uses `python scripts/smoke_test.py --chart-live` with a backend `OPENAI_API_KEY`.
+- The two-way GPT-Live conversation uses the microphone and speaker procedure in [Discuss a saved decision by voice](#discuss-a-saved-decision-by-voice).

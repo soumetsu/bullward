@@ -93,13 +93,13 @@ def _candle_end(start, interval):
     raise ValueError("Select a regular-session candle start aligned to the requested interval.")
 
 
-def _order_size():
+def _order_size(variable, fallback):
     try:
-        size = int(os.environ.get("INVEST_PAPER_ORDER_SIZE", str(DEFAULT_ORDER_SIZE)))
+        size = int(os.environ.get(variable, str(fallback)))
     except ValueError:
         size = 0
     if not 1 <= size <= 2**53 - 1:
-        raise ValueError("INVEST_PAPER_ORDER_SIZE must be a positive whole number of shares.")
+        raise ValueError(f"{variable} must be a positive whole number of shares.")
     return size
 
 
@@ -198,12 +198,14 @@ def create_snapshot(db_path, request, source):
         missing.append("both completed-candle SMAs")
     if account is None:
         missing.append("paper account at candle close")
+    order_size = _order_size("INVEST_PAPER_ORDER_SIZE", DEFAULT_ORDER_SIZE)
     facts = {
         "symbol": symbol, "interval": request.interval, "candle_timestamp": timestamp,
         "decision_time": stamp(cutoff), "close": selected["close"] if selected else None,
         "sma": {"short": indicator_values[0], "long": indicator_values[1],
                 "short_window": request.short, "long_window": request.long, "crossover": crossover},
-        "account": account, "order_size": _order_size(),
+        "account": account, "order_size": order_size,
+        "sell_size": _order_size("INVEST_PAPER_SELL_SIZE", order_size),
         "market_source": source, "market_data": "constructed" if test_data else "recorded",
     }
     if request.range_start:
@@ -332,9 +334,10 @@ def _call_role(role, ask, snapshot, image, context=None):
 def _validate(action, facts):
     account = facts["account"]
     shares, size = account["shares"], facts["order_size"]
+    sell_size = facts.get("sell_size", size)
     if action == "buy" and Decimal(account["cash"]) < size * Decimal(str(facts["close"])):
         return None, "Cash at the snapshot close does not cover the configured share quantity."
-    if action == "sell" and shares < size:
+    if action == "sell" and shares < sell_size:
         return None, "The position is smaller than the configured sale size."
     if action in ("hold", "close") and shares == 0:
         return None, "This action requires an open position."
@@ -343,7 +346,7 @@ def _validate(action, facts):
     expected = {"buy": "up", "sell": "down", "close": "down"}.get(action)
     if expected and facts["sma"]["crossover"] != expected:
         return None, f"{action.capitalize()} requires a confirmed {expected} SMA crossover."
-    return {"buy": size, "sell": size, "close": shares}.get(action), None
+    return {"buy": size, "sell": sell_size, "close": shares}.get(action), None
 
 
 def _role(provider, model, questions):

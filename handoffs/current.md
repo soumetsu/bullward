@@ -4,7 +4,7 @@ Updated: 2026-11-16
 
 ## Current handoff
 
-The repository is on `main`. Prompts 10A, 11, and 12 were pushed to `origin/main` as `0710c0a`. Prompt 13 is implemented in the working tree for review. The numbered sections below preserve each session's record.
+The repository is on `main`. Prompt 13 was pushed to `origin/main` as `073aace`. Prompt 14 is in the working tree for review. The numbered sections below preserve each session's record.
 
 ## Project and root
 
@@ -139,3 +139,11 @@ The development backend on port 8001 and the dashboard on port 5175 are running 
 `python -m scripts.check_voice` passed the controlled backend checks. `python scripts/smoke_test.py --voice` passed with a local WebRTC peer and synthetic audio. The browser displayed the filled buy and skipped veto, ended the test track after End voice, a channel disconnect, and a simulated signaling failure, and showed the denied-microphone state. SQLite remained byte-for-byte identical. Decisions, replay, paper automation, Prompt 9, the frontend adapter tests, and the build passed. See `docs/verification.md` for the observed results.
 
 FastAPI on port 8001 and the dashboard on port 5175 are running with Prompt 13. Outstanding verification requires `OPENAI_API_KEY` with GPT-Live access in the backend process environment. Run the localhost procedure in README with a microphone and speaker, compare the two spoken answers with the saved record, and record what was heard and whether the browser released the microphone. Prompt 13 awaits review before commit. Next implementation prompt when requested is Prompt 14.
+
+## Prompt 14
+
+`python -m scripts.smoke_test --workstation` starts isolated FastAPI and Vite services, opens an installed Chromium-based browser, drives the real Vue UI against recorded market events, and verifies SQLite. `scripts/workstation_fixture.py` seeds the prices and controls the Decisions HTTP transport. `scripts/workstation_runner.py` and `scripts/workstation_browser.mjs` launch and close the browser and assert visible results. `.github/workflows/smoke-test.yml` runs the command on pushes. The app supports editing a saved indicator's window and freezing an independent partial-sale size in a decision snapshot. Existing packages and lockfiles were reused.
+
+Both final runs exited 0 with fresh databases and browser profiles. The browser and SQLite agreed on $1,025 cash, zero shares, $25 realized, and $0 unrealized. Both runs verified the saved SMA edit, the visible controlled provider failure, and three fills after exact duplicate intake, a reviewer veto, and a subsequent completed candle after Stop. AutoLoop corrected an Edge startup failure and a time-label mismatch. See `docs/verification.md` for the results and remaining live observations.
+
+The running development dashboard on port 5175 and FastAPI on port 8001 include the indicator window editor. Prompt 14 awaits review. The next step is to commit and push the reviewed changes when requested, then check the workflow result for that commit. Prompt 14 is the last numbered prompt currently saved.

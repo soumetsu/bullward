@@ -94,6 +94,12 @@ The voice view loads a saved decision by ID. FastAPI reads the decision and its 
 
 After the student starts voice, Vue requests the microphone, creates the WebRTC audio track and event channel, and sends the offer and decision ID to FastAPI. FastAPI builds the session instructions from the saved summary, exchanges SDP with GPT-Live using its environment credential, and returns the answer. The browser applies the answer, plays the remote track, and keeps the same session for follow-up questions. The provider receives the summary as context and has no tools for order execution or fresh market data. End voice stops capture immediately and closes the connection after the provider acknowledges or the timeout elapses. Disconnects and startup failures also release the track and peer.
 
+## Workstation SmokeTest (Prompt 14)
+
+The smoke runner starts the same Vue and FastAPI entry points used for development, with a new SQLite file and browser profile. SQLite stores the deterministic market observations through the normal recorder. The real replay route delivers one observation per browser step. The offline Decisions transport decodes the chart PNG at the outbound request boundary, checks the snapshot tag, symbol and time, and returns scripted answers or a provider error. The test compares the stored PNG digest with what each role received. The fixture routes exist only in the disposable test server.
+
+Window edits update the existing saved indicator by ID. A new decision snapshot freezes the configured partial-sale size alongside the buy size. Earlier snapshots use their saved order size for either side. A close uses the remaining position at submission and verifies that quantity at the fill.
+
 ## Future integration flow
 
 ```text

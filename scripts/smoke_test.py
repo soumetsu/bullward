@@ -1,6 +1,6 @@
-"""Dashboard SmokeTest: HTTP checks plus a human/agent browser observation.
+"""Dashboard SmokeTest with an automated workstation mode and focused manual checks.
 
-Run from the project root: python scripts/smoke_test.py
+Run from the project root: python -m scripts.smoke_test --workstation
 Use --no-open when an agent opens the printed URL with its browser tool.
 No source edits, additional packages, or stored data are required.
 """
@@ -157,6 +157,7 @@ def main():
     mode.add_argument('--chart-live', action='store_true', help='Submit a constructed chart to the configured live provider.')
     mode.add_argument('--automation', action='store_true', help='Check paper automation with disposable replay and fixed replies.')
     mode.add_argument('--voice', action='store_true', help='Check decision voice using a local WebRTC peer and synthetic audio.')
+    mode.add_argument('--workstation', action='store_true', help='Run the offline indicator, chart and automation browser checks.')
     options = args.parse_args()
     chart = options.chart or options.chart_live
     if options.browser_timeout <= 0:
@@ -184,6 +185,10 @@ def main():
                 else:
                     backend_env['INVEST_LIVE_FEED'] = '0'
                     backend_args = ['uvicorn', 'backend.main:app', '--host', '127.0.0.1', '--port', str(backend_port)]
+                if options.workstation:
+                    backend_env.update(INVEST_SOURCE_LABEL='Constructed workstation smoke test',
+                                       INVEST_PAPER_TEST_MODE='1', INVEST_PAPER_ORDER_SIZE='4', INVEST_PAPER_SELL_SIZE='1')
+                    backend_args = ['scripts.workstation_fixture', str(backend_port)]
                 if options.replay or options.prompt9 or chart or options.automation or options.voice:
                     module = ('scripts.check_voice' if options.voice else
                               'scripts.check_automation' if options.automation else
@@ -196,12 +201,13 @@ def main():
                     snapshot = database.read_bytes()
                     if chart:
                         backend_env['INVEST_PAPER_ORDER_SIZE'] = '1'
+                        backend_env['INVEST_PAPER_SELL_SIZE'] = '1'
                         backend_args = ['scripts.check_decisions', '--serve', str(backend_port), '--chart']
                         if options.chart_live:
                             backend_args.append('--live')
                     elif options.automation:
                         backend_env.update(INVEST_SOURCE_LABEL='Constructed automation fixture',
-                                           INVEST_PAPER_TEST_MODE='1', INVEST_PAPER_ORDER_SIZE='1')
+                                           INVEST_PAPER_TEST_MODE='1', INVEST_PAPER_ORDER_SIZE='1', INVEST_PAPER_SELL_SIZE='1')
                         backend_args = ['scripts.check_automation', '--serve', str(backend_port)]
                     elif options.voice:
                         decisions = json.loads(database.with_suffix('.json').read_text(encoding='utf-8'))
@@ -223,6 +229,16 @@ def main():
                 assert len(rows) == 3, f'Expected three fixture candles, got {len(rows)}'
                 assert rows[1] == expected, f'Unexpected middle candle: {rows[1]}'
                 print('HTTP PASS: three candles; 14:31 UTC matches all six source fields.', flush=True)
+                if options.workstation:
+                    if not __package__:
+                        sys.path.insert(0, str(ROOT))
+                    from scripts.workstation_fixture import check
+                    from scripts.workstation_runner import run_browser
+
+                    run_browser(node, frontend_url, Path(temp), log)
+                    with urlopen(frontend_url + '/api/workstation-smoke/state', timeout=5) as response:
+                        check(database, json.load(response)['calls'])
+                    return 0
                 browser_url = frontend_url
                 if options.voice:
                     browser_url += '/?source=voice&decision=' + decisions['filled']

@@ -115,19 +115,23 @@ def configurations(db_path):
         ]
 
 
+def _prepare_configurations(connection, window):
+    if window > 2**63 - 1:
+        raise ValueError("The window is too large to save.")
+    connection.execute("BEGIN IMMEDIATE")
+    connection.execute("""
+        CREATE TABLE IF NOT EXISTS chart_indicators (
+            id INTEGER PRIMARY KEY, name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+            type TEXT NOT NULL, window INTEGER NOT NULL CHECK (window > 0)
+        )
+    """)
+
+
 def save_configuration(db_path, config):
     if config.type not in TYPES:
         raise ValueError("Choose an available indicator type.")
-    if config.settings.window > 2**63 - 1:
-        raise ValueError("The window is too large to save.")
     with closing(sqlite3.connect(db_path)) as connection, connection:
-        connection.execute("BEGIN IMMEDIATE")
-        connection.execute("""
-            CREATE TABLE IF NOT EXISTS chart_indicators (
-                id INTEGER PRIMARY KEY, name TEXT NOT NULL COLLATE NOCASE UNIQUE,
-                type TEXT NOT NULL, window INTEGER NOT NULL CHECK (window > 0)
-            )
-        """)
+        _prepare_configurations(connection, config.settings.window)
         try:
             connection.execute(
                 "INSERT INTO chart_indicators (name, type, window) VALUES (?, ?, ?)",
@@ -135,4 +139,15 @@ def save_configuration(db_path, config):
             )
         except sqlite3.IntegrityError as error:
             raise ValueError("An indicator already uses that name.") from error
+    return configurations(db_path)
+
+
+def update_indicator_window(db_path, indicator_id, settings):
+    with closing(sqlite3.connect(db_path)) as connection, connection:
+        _prepare_configurations(connection, settings.window)
+        result = connection.execute(
+            "UPDATE chart_indicators SET window = ? WHERE id = ?", (settings.window, indicator_id),
+        )
+        if not result.rowcount:
+            raise LookupError("Saved indicator not found.")
     return configurations(db_path)

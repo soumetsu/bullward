@@ -17,8 +17,8 @@ from .decisions import (
     DecisionRequest, SnapshotRequest, create_snapshot, get_capture, get_decision, get_snapshot, request_decision,
 )
 from .indicators import (
-    IndicatorConfig, IndicatorRequest, available_types, calculate_indicators,
-    configurations, save_configuration,
+    IndicatorConfig, IndicatorRequest, IndicatorSettings, available_types, calculate_indicators,
+    configurations, save_configuration, update_indicator_window,
 )
 from .live_feed import LiveFeed, SYMBOL
 from .observations import DEFAULT_DB_PATH, initialize_database
@@ -179,6 +179,16 @@ def create_indicator(config: IndicatorConfig):
 def indicators(request: IndicatorRequest):
     try:
         return calculate_indicators(request, configurations(app.state.feed.db_path))
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.patch("/api/indicators/{indicator_id}")
+def edit_indicator_window(indicator_id: Annotated[int, Field(ge=1, le=2**63 - 1)], settings: IndicatorSettings):
+    try:
+        return update_indicator_window(app.state.feed.db_path, indicator_id, settings)
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
 

@@ -6,6 +6,7 @@
 - Before editing, inspect the relevant files and the current Git status when a Git repository exists. Preserve existing user work and follow the current prompt's scope.
 - Show the proposed changes to the student for review before making a commit. Do not commit until the student has reviewed the changes.
 - Save each major project prompt under `prompts/`, keeping existing prompt numbering. Record the checks performed and their observed results, including failures, in `docs/verification.md`.
+- After each prompt, explain what it added or changed, how to use or observe the result when applicable, what was verified, and what remains pending. When handling several prompts together, explain the outcome of each one.
 
 ## User product and design preferences
 

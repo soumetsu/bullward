@@ -11,6 +11,7 @@ const pair = ref({ short: 2, long: 3 })
 const name = ref('')
 const kind = ref('')
 const windowInput = ref(2)
+const editing = ref(null)
 const pairError = ref('')
 const saveError = ref('')
 const calculationError = ref('')
@@ -40,16 +41,33 @@ async function save() {
   }
   saving.value = true
   try {
-    const configured = await postJson('/api/indicators', {
-      name: name.value, type: kind.value, settings: { window: windowInput.value },
-    })
+    const settings = { window: windowInput.value }
+    const configured = editing.value
+      ? await requestJson(`/api/indicators/${editing.value}`, {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(settings),
+        })
+      : await postJson('/api/indicators', { name: name.value, type: kind.value, settings })
     catalog.value = { ...catalog.value, configured }
-    name.value = ''
+    clearEditor()
   } catch (error) {
     saveError.value = error.message
   } finally {
     saving.value = false
   }
+}
+
+function editWindow(item) {
+  editing.value = item.id
+  name.value = item.name
+  kind.value = item.type
+  windowInput.value = item.settings.window
+  saveError.value = ''
+}
+
+function clearEditor() {
+  editing.value = null
+  name.value = ''
+  saveError.value = ''
 }
 
 async function calculate() {
@@ -94,16 +112,20 @@ onBeforeUnmount(() => pending?.abort())
     <p v-if="pairError" role="alert">{{ pairError }}</p>
     <p v-if="calculationError" role="alert">{{ calculationError }}</p>
     <form v-if="catalog" class="tool-form" @submit.prevent="save" novalidate>
-      <label>Indicator type <select v-model="kind">
+      <label>Indicator type <select v-model="kind" :disabled="editing !== null">
         <option v-for="item in catalog.types" :key="item.type" :value="item.type">{{ item.label }}</option>
       </select></label>
-      <label>Indicator name <input v-model="name" maxlength="64"></label>
+      <label>Indicator name <input v-model="name" maxlength="64" :disabled="editing !== null"></label>
       <label>Indicator window <input v-model.number="windowInput" type="number" min="1" step="1"></label>
-      <button :disabled="saving">Add indicator</button>
+      <button :disabled="saving">{{ editing ? 'Save window' : 'Add indicator' }}</button>
+      <button v-if="editing" type="button" :disabled="saving" @click="clearEditor">Cancel edit</button>
     </form>
     <p v-if="saveError" role="alert">{{ saveError }}</p>
     <ul v-if="catalog?.configured.length" class="saved-indicators" aria-label="Saved indicators">
-      <li v-for="item in catalog.configured" :key="item.id">{{ item.name }} · {{ item.settings.window }} candles</li>
+      <li v-for="item in catalog.configured" :key="item.id">
+        {{ item.name }} · {{ item.settings.window }} candles
+        <button type="button" class="quiet" :disabled="saving" :aria-label="`Edit window for ${item.name}`" @click="editWindow(item)">Edit window</button>
+      </li>
     </ul>
   </section>
 </template>

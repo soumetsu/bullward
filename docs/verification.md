@@ -376,3 +376,26 @@ Pushed reviewed Prompts 10A–12 to `origin/main` as `0710c0a`. Reused Windows 1
 | Live microphone and speaker | Pending. The backend environment lacked `OPENAI_API_KEY`. No model speech was heard. With a key that has GPT-Live access, run the two-question localhost check in README and compare both spoken answers with the selected SQLite record. |
 
 The sandbox blocked a development health request. Outside the sandbox, the first restart failed because its requested log directory was absent. Restarted with a writable log path and verified the dashboard, direct and proxied health, and both voice routes in OpenAPI. Both development services were left running.
+
+## Prompt 14
+
+Rechecked the Prompt 13 controlled voice test and pushed Prompt 13 to `origin/main` as `073aace`. Inspected the smoke runner, browser tooling, npm lockfile, and backend requirements. Local checks used Windows 10.0.26200.0, Python 3.14.8 at `C:\Python314\python.exe`, Node 24.21.0, npm 11.19.0, pnpm 11.25.0, Corepack 0.36.0, and installed Edge 157.0.4341.60. The npm tree matched the pinned chart and Vue tooling. `python -m pip check` reported no broken requirements. The workstation test uses the existing browser, Node WebSocket support, and project packages.
+
+Ran `python -m scripts.smoke_test --workstation` twice after the final checks were in place. Each run started a fresh Chrome-compatible browser profile, its own FastAPI and Vite, and a separate SQLite database with 18 observations. Both runs exited 0.
+
+| Check | Expected and observed in both runs |
+|---|---|
+| Saved SMA | At the completed 14:34 UTC candle, the two-window value was `(75 + 100) / 2 = 87.50`. Editing the same indicator to three candles showed `(60 + 75 + 100) / 3 = 78.33` after rounding. SQLite held one saved SMA with window 3. |
+| Chart analysis | The SMOKE 14:34 UTC candle showed a 14:35 UTC cutoff. The browser decoded a nonuniform 960 × 440 PNG and displayed buy, up, sufficient, and accept. The Decisions transport verified the symbol, candle time, chart pixels, and snapshot tag. The saved digest matched the PNG sent to each role. |
+| Provider error | The 14:33 UTC request returned a controlled HTTP 503. The chart showed `provider_error` and the HTTP 503 message. The reviewer was never called for that request. The two manual analyses left the order and fill counts at zero. |
+| Paper automation | Started with $1,000, zero shares, and zero fees. A pending buy filled four shares at $100, a partial sale filled one at $110, and a close filled three at $105. The browser fill row and SQLite agreed on $1,025 cash, zero shares, $25 realized, and $0 unrealized. |
+| Duplicate, veto, and Stop | The intake recorder suppressed the repeated buy fill observation. The reviewer veto at 14:38 skipped a buy and left the fill count at two. After Stop, replay delivered the 14:42 upward crossover. The model call, order, and fill counts stayed unchanged after Stop. SQLite held three orders, three fills, seven automation jobs, and nine chart captures. |
+| Regressions | `python -m scripts.check_automation`, `python -m scripts.check_decisions`, `python -m scripts.check_prompt9`, and `python -m scripts.check_voice` passed. Both Node chart adapter tests, the 31-module Vite production build, and `git diff --check` passed. |
+
+AutoLoop completed two correction cycles. The initial Edge launcher exited before exposing DevTools and left a detached process tree. The Windows Edge launch option kept subsequent launches attached. The next run timed out on the chart selection because the test expected seconds in the candle table. The browser's UTC labels use hours and minutes. Updated the selectors and reran successfully. The failed chart-selection run and the passing runs closed their test browser and services. Stopped the initial detached Edge instance and removed its temporary profile. The final process and directory inventory found no leftovers. [Edge WebDriver launch example](https://github.com/MicrosoftEdge/EdgeWebDriver/issues/189)
+
+The push workflow uses the same command on the GitHub-hosted Ubuntu 24.04 image. The first hosted run is pending the reviewed Prompt 14 push. [Runner browser inventory](https://github.com/actions/runner-images/blob/main/images/ubuntu/Ubuntu2404-Readme.md#browsers-and-drivers)
+
+Reloaded the project's development backend on port 8001. The dashboard on port 5175 returned HTTP 200, proxied health returned `ok`, and the served OpenAPI document included the indicator window PATCH route.
+
+Live checks remain separate from these fixture passes. The earlier Yahoo market smoke run received no observations. The image-model test reached `provider_unconfigured`. The live GPT-Live check still needs a backend key with that model's access and a local microphone and speaker. README lists each procedure.

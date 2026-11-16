@@ -35,3 +35,5 @@ The owner has not yet specified the bot's strategy, brokerage/execution scope, a
 - Commit and push Prompt 10, then continue in order with Prompts 10A and 11.
 - Proceed to Prompt 12, the next prompt in the project sequence.
 - 2026-11-16: commit and push the reviewed work through Prompt 12, then proceed to Prompt 13.
+- 2026-11-16: commit and push Prompt 13, then proceed to Prompt 14.
+- After each prompt, explain what it did and keep that reporting instruction in `AGENTS.md`.
