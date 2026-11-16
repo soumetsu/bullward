@@ -237,4 +237,12 @@ Constructed data may trade only in a disposable replay account. The browser chec
 
 For the browser fixture, start Replay and step to the 14:34:05 UTC observation. Start automation. Step to 14:35:05 for the approval and pending order, 14:35:15 for a fill at $7, and 14:36:05 for a reviewer veto. Compare cash of $993, one share, and both decision links. Stop automation, then confirm the smoke test. It repeats the approved request and checks SQLite for one fill.
 
-Prompt 13 covers discussing a recorded decision by voice.
+## Discuss a saved decision by voice
+
+Select **Discuss by voice** from a saved chart analysis or paper automation result. You can also open **Decision voice** in the workspace navigation and load a saved decision by ID. The view shows the proposal, reviewer verdict, validation, and recorded paper outcome.
+
+Start FastAPI with `OPENAI_API_KEY` in its process environment and GPT-Live access for that key. Open the dashboard on localhost, select **Start voice**, and allow microphone access. The browser streams audio over WebRTC to OpenAI. FastAPI supplies the selected decision and the paper outcome linked to it. The voice session can explain that record and identify missing evidence. Select **End voice** to release the microphone.
+
+For a live check, ask “What did the agents decide for this symbol?” and then “What happened to the paper account?” in the same session. Compare both answers with the displayed record. For a skipped order or an analysis with no linked fill, check that the answer reflects the absence of a fill.
+
+Run `python -m scripts.check_voice` for the controlled backend check. Run `python scripts/smoke_test.py --voice` for the browser check with a local WebRTC peer and synthetic audio. Follow the runner instructions to test End voice and a disconnect on the filled decision, then open the two printed URLs for simulated signaling failure and denied microphone access. Check that each path leaves the microphone off before confirming the smoke test. [OpenAI WebRTC guide](https://developers.openai.com/api/docs/guides/voice-webrtc?voice-api=live)

@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { postJson, requestJson } from '../api'
+import { voiceLink } from '../voiceConnection'
 import FrozenChartCapture from './FrozenChartCapture.vue'
 
 const props = defineProps({
@@ -178,6 +179,7 @@ onBeforeUnmount(() => {
               <td>
                 <a v-if="job.decision_id" :href="`/api/decisions/${job.decision_id}`">{{ job.decision_id }}</a>
                 <template v-if="job.capture"><br><a :href="job.capture.url">Saved chart</a></template>
+                <template v-if="job.decision_id"><br><a :href="voiceLink(job.decision_id)" target="_blank" rel="noopener">Discuss by voice</a></template>
               </td>
             </tr>
           </tbody>

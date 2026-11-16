@@ -88,6 +88,12 @@ An automation job links the saved decision, simulator order, and fill. Python ap
 
 Constructed snapshots are ineligible in the default database. The fixture runner explicitly enables constructed execution only for a replay account in a separate database. Manual analysis has no execution path. The browser panel reads the saved run and can still show its most recent jobs after reload.
 
+## Decision voice (Prompt 13)
+
+The voice view loads a saved decision by ID. FastAPI reads the decision and its linked automation outcome from the same read-only SQLite transaction. The summary distinguishes the frozen account at the decision cutoff from the cash and shares in the fill's stored P&L event. Manual analyses and other decisions without a linked order or fill report that absence.
+
+After the student starts voice, Vue requests the microphone, creates the WebRTC audio track and event channel, and sends the offer and decision ID to FastAPI. FastAPI builds the session instructions from the saved summary, exchanges SDP with GPT-Live using its environment credential, and returns the answer. The browser applies the answer, plays the remote track, and keeps the same session for follow-up questions. The provider receives the summary as context and has no tools for order execution or fresh market data. End voice stops capture immediately and closes the connection after the provider acknowledges or the timeout elapses. Disconnects and startup failures also release the track and peer.
+
 ## Future integration flow
 
 ```text
@@ -124,7 +130,7 @@ AI assistance, options workflows, and automation may be added to Python applicat
 
 ## What exists today
 
-The Vue workspace has a Yahoo Finance dashboard, a labeled synthetic chart, recorded-session replay, configurable indicators, and simulated orders with P&L history. The Vite proxy carries HTTP and WebSocket traffic. Lightweight Charts 5.2.1 displays price with aligned volume, while the inspector and table show exact values. The Yahoo Finance receipt command and one-minute calculator remain available in the terminal. AI advising, automation, option chains, IV, and alerts remain future work. User-stated direction for those features is in `docs/user_preferences.md`.
+The Vue workspace has a Yahoo Finance dashboard, a labeled synthetic chart, recorded-session replay, configurable indicators, and simulated orders with P&L history. The Vite proxy carries HTTP and WebSocket traffic. Lightweight Charts 5.2.1 displays price with aligned volume, while the inspector and table show exact values. The Yahoo Finance receipt command and one-minute calculator remain available in the terminal. The workspace also supports saved chart analysis, paper automation, and GPT-Live discussion of one saved decision. Option chains, IV, and alerts remain future work. User-stated direction is in `docs/user_preferences.md`.
 
 ## Open design decisions
 

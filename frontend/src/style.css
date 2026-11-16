@@ -102,3 +102,9 @@ tr.selected { background: #edf6f0; }
 .decision-roles dt { font-size: 13px; text-transform: none; }
 .decision-roles dd { margin: 4px 0 0; font-size: 16px; }
 .automation-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.tool-form .decision-id-input { width: min(100%, 350px); max-width: none; }
+#voice-heading { margin-bottom: 14px; }
+#voice-heading + form { margin-bottom: 22px; }
+.voice-findings { display: flex; flex-wrap: wrap; gap: 12px 28px; }
+.voice-findings dd { margin: 3px 0 0; font-size: 16px; }
+[aria-labelledby="voice-heading"] audio { margin-top: 14px; width: min(100%, 360px); }

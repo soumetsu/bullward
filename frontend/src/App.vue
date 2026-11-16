@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import CandleChart from './components/CandleChart.vue'
 import ChartDecision from './components/ChartDecision.vue'
+import DecisionVoice from './components/DecisionVoice.vue'
 import IndicatorControls from './components/IndicatorControls.vue'
 import PaperAccount from './components/PaperAccount.vue'
 import PaperAutomation from './components/PaperAutomation.vue'
@@ -27,6 +28,7 @@ const mode = new URLSearchParams(location.search).get('source')
 const sample = mode === 'sample'
 const replay = mode === 'replay'
 const paper = mode === 'paper'
+const voice = mode === 'voice'
 const symbol = 'AAPL'
 const intervals = { '1m': '1 minute', '5m': '5 minutes', '15m': '15 minutes', '1h': '1 hour', '1d': 'Daily' }
 const interval = ref('1m')
@@ -155,7 +157,7 @@ function askAboutChart() {
 }
 
 onMounted(() => {
-  if (replay || paper) {
+  if (replay || paper || voice) {
     loading.value = false
     return
   }
@@ -175,9 +177,10 @@ onBeforeUnmount(() => {
 <template>
   <header class="app-header">
     <a class="brand" href="/" aria-label="Project 4 Invest home"><span class="brand-mark">I↗</span> Project 4 <strong>Invest</strong></a>
-    <nav aria-label="Workspace"><a href="/">Live chart</a><a href="/?source=replay" :aria-current="replay ? 'page' : undefined">Replay</a><a href="/?source=paper" :aria-current="paper ? 'page' : undefined">Paper account</a></nav>
+    <nav aria-label="Workspace"><a href="/">Live chart</a><a href="/?source=replay" :aria-current="replay ? 'page' : undefined">Replay</a><a href="/?source=paper" :aria-current="paper ? 'page' : undefined">Paper account</a><a href="/?source=voice" :aria-current="voice ? 'page' : undefined">Decision voice</a></nav>
   </header>
-  <main v-if="paper"><PaperAccount /></main>
+  <main v-if="voice"><DecisionVoice /></main>
+  <main v-else-if="paper"><PaperAccount /></main>
   <main v-else>
     <div class="page-heading">
       <div><p class="eyebrow">MARKET RESEARCH</p><h1>{{ replay ? 'Replay' : 'Price & volume' }}</h1></div>

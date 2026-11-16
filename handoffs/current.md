@@ -1,10 +1,10 @@
 # Current project state
 
-Updated: 2026-11-15
+Updated: 2026-11-16
 
 ## Current handoff
 
-The repository is on `main`. Prompt 10 was pushed to `origin/main` as `948c42e`. Prompts 10A, 11, and 12 are implemented in the working tree for review. The numbered sections below preserve each session's record.
+The repository is on `main`. Prompts 10A, 11, and 12 were pushed to `origin/main` as `0710c0a`. Prompt 13 is implemented in the working tree for review. The numbered sections below preserve each session's record.
 
 ## Project and root
 
@@ -131,3 +131,11 @@ Next implementation prompt when requested: Prompt 12. Prompts 10A and 11 await r
 `python -m scripts.check_automation` and `python scripts/smoke_test.py --automation` passed. The browser and SQLite both showed one fill at $7, cash $993, one share, and a separate vetoed proposal. A retry left the ledger unchanged. The startup-handler, missing-capture, Stop, and expiry checks passed. See `docs/verification.md` for the exact checks. Replies were controlled, and live market and OpenAI checks remain pending.
 
 The development backend on port 8001 and the dashboard on port 5175 are running with Prompt 12. Next implementation prompt when requested: Prompt 13. Prompts 10A, 11, and 12 await review before commit.
+
+## Prompt 13
+
+`backend/voice.py` assembles a read-only SQLite view of one saved decision, its analyst and reviewer findings, and any linked paper outcome. The FastAPI voice routes read that summary and exchange a WebRTC offer with GPT-Live. `frontend/src/components/DecisionVoice.vue` starts and ends voice, plays the remote stream, and shows microphone status. Saved chart decisions and paper automation results link to the view. No dependencies changed.
+
+`python -m scripts.check_voice` passed the controlled backend checks. `python scripts/smoke_test.py --voice` passed with a local WebRTC peer and synthetic audio. The browser displayed the filled buy and skipped veto, ended the test track after End voice, a channel disconnect, and a simulated signaling failure, and showed the denied-microphone state. SQLite remained byte-for-byte identical. Decisions, replay, paper automation, Prompt 9, the frontend adapter tests, and the build passed. See `docs/verification.md` for the observed results.
+
+FastAPI on port 8001 and the dashboard on port 5175 are running with Prompt 13. Outstanding verification requires `OPENAI_API_KEY` with GPT-Live access in the backend process environment. Run the localhost procedure in README with a microphone and speaker, compare the two spoken answers with the saved record, and record what was heard and whether the browser released the microphone. Prompt 13 awaits review before commit. Next implementation prompt when requested is Prompt 14.

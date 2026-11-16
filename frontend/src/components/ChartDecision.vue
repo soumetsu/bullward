@@ -1,6 +1,7 @@
 <script setup>
 import { shallowRef, ref } from 'vue'
 import { postJson } from '../api'
+import { voiceLink } from '../voiceConnection'
 import FrozenChartCapture from './FrozenChartCapture.vue'
 
 const emit = defineEmits(['busy'])
@@ -69,7 +70,10 @@ defineExpose({ ask })
         </section>
       </div>
       <p class="muted">Decision {{ decision.id }} · {{ decision.facts?.market_data }} market data</p>
-      <a v-if="decision.capture" :href="decision.capture.url">Open saved PNG</a>
+      <div class="automation-controls">
+        <a v-if="decision.capture" :href="decision.capture.url">Open saved PNG</a>
+        <a :href="voiceLink(decision.id)">Discuss by voice</a>
+      </div>
     </template>
   </section>
 </template>

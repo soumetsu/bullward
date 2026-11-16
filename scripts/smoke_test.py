@@ -156,6 +156,7 @@ def main():
     mode.add_argument('--chart', action='store_true', help='Check chart capture and review with a controlled provider.')
     mode.add_argument('--chart-live', action='store_true', help='Submit a constructed chart to the configured live provider.')
     mode.add_argument('--automation', action='store_true', help='Check paper automation with disposable replay and fixed replies.')
+    mode.add_argument('--voice', action='store_true', help='Check decision voice using a local WebRTC peer and synthetic audio.')
     options = args.parse_args()
     chart = options.chart or options.chart_live
     if options.browser_timeout <= 0:
@@ -183,8 +184,9 @@ def main():
                 else:
                     backend_env['INVEST_LIVE_FEED'] = '0'
                     backend_args = ['uvicorn', 'backend.main:app', '--host', '127.0.0.1', '--port', str(backend_port)]
-                if options.replay or options.prompt9 or chart or options.automation:
-                    module = ('scripts.check_automation' if options.automation else
+                if options.replay or options.prompt9 or chart or options.automation or options.voice:
+                    module = ('scripts.check_voice' if options.voice else
+                              'scripts.check_automation' if options.automation else
                               'scripts.check_prompt9' if options.prompt9 or chart else 'scripts.check_replay')
                     subprocess.run(
                         [sys.executable, '-m', module, '--seed', str(database)],
@@ -201,11 +203,18 @@ def main():
                         backend_env.update(INVEST_SOURCE_LABEL='Constructed automation fixture',
                                            INVEST_PAPER_TEST_MODE='1', INVEST_PAPER_ORDER_SIZE='1')
                         backend_args = ['scripts.check_automation', '--serve', str(backend_port)]
+                    elif options.voice:
+                        decisions = json.loads(database.with_suffix('.json').read_text(encoding='utf-8'))
+                        backend_args = ['scripts.check_voice', '--serve', str(backend_port)]
                 backend = subprocess.Popen([sys.executable, '-m', *backend_args], cwd=ROOT, env=backend_env, **common)
                 processes.append(backend)
                 wait_ready(backend_url + '/api/health', backend)
                 env = dict(os.environ, INVEST_API_TARGET=backend_url)
-                frontend = subprocess.Popen([node, str(ROOT / 'frontend/node_modules/vite/bin/vite.js'), '--host', '127.0.0.1', '--port', str(frontend_port), '--strictPort'], cwd=ROOT / 'frontend', env=env, **common)
+                frontend_command = [node, str(ROOT / 'frontend/node_modules/vite/bin/vite.js'), '--host',
+                                    '127.0.0.1', '--port', str(frontend_port), '--strictPort']
+                if options.voice:
+                    frontend_command.extend(['--config', 'vite.voice-smoke.config.js'])
+                frontend = subprocess.Popen(frontend_command, cwd=ROOT / 'frontend', env=env, **common)
                 processes.append(frontend)
                 wait_ready(frontend_url + '/api/health', frontend)
                 with urlopen(frontend_url + '/api/history', timeout=5) as response:
@@ -215,14 +224,26 @@ def main():
                 assert rows[1] == expected, f'Unexpected middle candle: {rows[1]}'
                 print('HTTP PASS: three candles; 14:31 UTC matches all six source fields.', flush=True)
                 browser_url = frontend_url
-                if options.replay or options.prompt9 or chart or options.automation:
+                if options.voice:
+                    browser_url += '/?source=voice&decision=' + decisions['filled']
+                elif options.replay or options.prompt9 or chart or options.automation:
                     browser_url += '/?source=replay'
                 elif not (options.live or options.fixture):
                     browser_url += '/?source=sample'
                 print(f'BROWSER URL: {browser_url}', flush=True)
                 if not options.no_open:
                     webbrowser.open(browser_url)
-                if options.automation:
+                if options.voice:
+                    print('Expect buy, accept, one filled share at $7 and $993 cash. Start voice and verify '
+                          'Voice connected, Microphone active, and a remote audio track. End voice and check '
+                          'Microphone off and Synthetic microphone track ended. Start again, then choose '
+                          'Disconnect fixture peer and verify the same cleanup.', flush=True)
+                    failed_url = f'{frontend_url}/?source=voice&decision={decisions["vetoed"]}&voice_fixture=failed'
+                    print(f'Failed-connection URL: {failed_url}', flush=True)
+                    print(f'Denied-microphone URL: {browser_url}&voice_fixture=denied', flush=True)
+                    print('The failed decision was vetoed and has no fill. Start voice and verify cleanup. '
+                          'Then verify the denied-microphone message.', flush=True)
+                elif options.automation:
                     print('Start replay. Step through source 14:34:05 UTC. Start paper automation, then step to '
                           '14:35:05 (approved buy pending), 14:35:15 (fills at $7), and 14:36:05 '
                           '(vetoed hold). Confirm cash $993, 1 share and both decision links, then Stop.', flush=True)
@@ -326,6 +347,20 @@ def main():
                     return 2
                 if options.automation:
                     check_automation(database, frontend_url)
+                if options.voice:
+                    with urlopen(frontend_url + '/api/voice-fixture/report', timeout=5) as response:
+                        report = json.load(response)
+                    assert len(report) == 3, report
+                    *connected, failed = report
+                    for attempt in connected:
+                        assert attempt['answered'] and attempt['summary']['decision_id'] == decisions['filled']
+                        assert attempt['summary']['paper_outcome']['cash_after_fill'] == '993'
+                        assert attempt['summary']['proposal'] == 'buy'
+                    assert not failed['answered'] and failed['summary']['decision_id'] == decisions['vetoed']
+                    assert failed['summary']['paper_outcome']['status'] == 'skipped'
+                    assert failed['summary']['paper_outcome']['fill_price'] is None
+                    assert database.read_bytes() == snapshot, 'Voice changed the observation or paper database.'
+                    print('Verified both voice summaries, the controlled connection failure, and an unchanged SQLite database.', flush=True)
                 print('PASS: HTTP checks and browser observation completed.', flush=True)
                 return 0
             except (Exception, KeyboardInterrupt) as error:

@@ -362,3 +362,17 @@ Reused Windows 10.0.26200.0, Python 3.14.8, Node 24.21.0, npm 11.19.0, and the e
 All Prompt 12 proposals and verdicts were controlled fixture replies on constructed observations. Live provider and market verification remain pending from earlier prompts.
 
 Restarted the local development backend and left both services running. FastAPI health, the dashboard, proxied health, and OpenAPI each returned HTTP 200. OpenAPI confirmed the paper automation start route.
+
+## Prompt 13
+
+Pushed reviewed Prompts 10A–12 to `origin/main` as `0710c0a`. Reused Windows 10.0.26200.0, Python 3.14.8, Node 24.21.0, npm 11.19.0, and the existing dependencies. `python -m pip check` found no broken requirements. No software or dependency files changed. [OpenAI WebRTC guide](https://developers.openai.com/api/docs/guides/voice-webrtc?voice-api=live)
+
+| Check | Expected and observed |
+|---|---|
+| `python -m scripts.check_voice` | Passed with the controlled provider. The summary included the saved buy, reviewer acceptance, and one-share fill at $7 with $993 cash. The veto stayed skipped with no recorded fill. A manual decision based on the same snapshot had no linked paper outcome. The test checked the JSON session and WebRTC offer sent to the transport, verified the returned answer, rejected an offer without audio, and reported status 503 when the key was absent. |
+| `python scripts/smoke_test.py --voice --no-open --browser-timeout 14400 --browser-result-file .smoke-voice-result.txt` | Passed with the local WebRTC peer and synthetic audio. The browser showed the saved buy and its $993 balance. Start voice showed “Voice connected” and “Microphone active” with the remote audio control visible. End voice showed “Voice ended,” “Microphone off,” and an ended synthetic track. |
+| Browser failure paths | Closing the fixture event channel showed “Voice disconnected” and ended the synthetic track. The saved hold showed reviewer veto and skipped outcome. With simulated provider HTTP 503, the browser showed the error and the synthetic track ended. With simulated microphone denial, the browser showed the denial and microphone off, and no voice offer was sent. The runner confirmed both saved summaries and a byte-for-byte unchanged SQLite database, then stopped its services. |
+| Regressions | `python -m scripts.check_automation`, `python -m scripts.check_prompt9`, `python -m scripts.check_replay`, and `python -m scripts.check_decisions` passed. The two Node chart adapter tests and the 31-module Vite build passed. |
+| Live microphone and speaker | Pending. The backend environment lacked `OPENAI_API_KEY`. No model speech was heard. With a key that has GPT-Live access, run the two-question localhost check in README and compare both spoken answers with the selected SQLite record. |
+
+The sandbox blocked a development health request. Outside the sandbox, the first restart failed because its requested log directory was absent. Restarted with a writable log path and verified the dashboard, direct and proxied health, and both voice routes in OpenAPI. Both development services were left running.

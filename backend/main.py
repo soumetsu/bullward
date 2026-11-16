@@ -6,6 +6,7 @@ import logging
 import os
 from pathlib import Path
 from typing import Annotated, Literal
+from urllib.parse import urlsplit
 from uuid import UUID
 
 from fastapi import FastAPI, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect
@@ -28,6 +29,7 @@ from .paper_automation import (
 )
 from .replay import recorded_symbols, replay_step
 from .timeframes import aggregate_candles
+from .voice import VoiceConnectionError, VoiceRequest, decision_voice_summary, exchange_voice_offer
 
 Interval = Literal["1m", "5m", "15m", "1h", "1d"]
 Symbol = Literal["AAPL"]
@@ -273,6 +275,34 @@ def read_decision_capture(decision_id: UUID):
     if png is None:
         raise HTTPException(status_code=404, detail="Chart capture not found.")
     return Response(png, media_type="image/png", headers={"X-Content-Type-Options": "nosniff"})
+
+
+@app.get("/api/decisions/{decision_id}/voice-summary")
+def read_voice_summary(decision_id: UUID):
+    summary = decision_voice_summary(app.state.feed.db_path, str(decision_id))
+    if summary is None:
+        raise HTTPException(status_code=404, detail="Decision not found.")
+    return summary
+
+
+@app.post("/api/voice/sessions", status_code=201)
+def start_voice_session(offer: VoiceRequest, request: Request, response: Response):
+    origin = request.headers.get("origin")
+    if origin:
+        try:
+            parsed = urlsplit(origin)
+            allowed = parsed.scheme in ("http", "https") and parsed.hostname in ("localhost", "127.0.0.1", "::1")
+        except ValueError:
+            allowed = False
+        if not allowed:
+            raise HTTPException(status_code=403, detail="Voice sessions are limited to the local dashboard.")
+    summary = read_voice_summary(offer.decision_id)
+    try:
+        result = exchange_voice_offer(summary, offer.sdp)
+    except VoiceConnectionError as error:
+        raise HTTPException(status_code=error.status_code, detail=str(error)) from error
+    response.headers["Cache-Control"] = "no-store"
+    return result
 
 
 @app.websocket("/api/candles/live")
