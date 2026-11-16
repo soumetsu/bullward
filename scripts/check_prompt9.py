@@ -17,16 +17,19 @@ def at(time):
     return datetime.fromisoformat(f"2026-11-09T{time}Z")
 
 
-def save(db, symbol, time, price):
-    return record_observation(db, {
+def save(db, symbol, time, price, volume=None):
+    message = {
         "id": symbol, "time": int(at(time).timestamp() * 1000), "price": price, "test_data": True,
-    }, at(time))
+    }
+    if volume is not None:
+        message["day_volume"] = volume
+    return record_observation(db, message, at(time))
 
 
 def seed(db):
     initialize_database(db)
     for index, price in enumerate([13, 10, 7, 13, 19, 7, 1, 30]):
-        save(db, "SMA", f"14:{30 + index}:05", price)
+        save(db, "SMA", f"14:{30 + index}:05", price, 1000 + (index + 1) * (index + 2) * 10)
     for index, (high, low) in enumerate([(12, 9), (15, 10), (13, 11)]):
         save(db, "RANGE", f"14:{30 + index}:05", low)
         save(db, "RANGE", f"14:{30 + index}:35", high)

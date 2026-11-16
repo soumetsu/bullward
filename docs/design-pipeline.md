@@ -74,6 +74,20 @@ The server reads market evidence and the paper ledger in one SQLite read transac
 
 The local Decisions API sends the frozen facts as JSON to the OpenAI Decisions API with the named choice `paper_action`. Python checks the returned choice against the saved cash, position, and order size. The explanation uses the recorded facts and validation result. SQLite keeps the provider/model, proposal, explanation, validation status, and snapshot reference under the returned local decision ID. Test evidence, missing inputs, provider errors, and account-rule failures never yield an eligible paper order. A valid proposal is evaluated using the snapshot price. Any future execution must recheck the current ledger and next fill price. [OpenAI Decisions API](https://developers.openai.com/api/docs/guides/decisions)
 
+## Chart analysis and review (Prompts 10A and 11)
+
+The dashboard submits the selected candle, interval, active SMA windows, and visible range start. Replay also submits its receipt cursor and account context. The server computes indicators using all eligible history and trims the exported chart to the frozen range through the selected candle. Vue draws that frozen data in a separate chart and uses Lightweight Charts' screenshot API to produce a chart-only PNG. A PNG text chunk carries the snapshot ID. Python checks PNG structure and image data and compares the tag to the saved snapshot before invoking a provider. The database stores the PNG bytes and the API exposes a readback URL. The snapshot tag binds the application's capture flow. The analyst's visual crossover is checked independently against Python's calculated signal. [Lightweight Charts screenshot API](https://tradingview.github.io/lightweight-charts/examples/data/screenshot)
+
+One call per role uses the same saved facts. The chart analyst receives the image in the same message as those facts and returns three named choices. The reviewer receives the same image plus the parsed analyst answers and observed evidence. Each role has a 20-second transport timeout. Results retain each role's questions, named answers, provider, model, status, and response ID. The prototype strategy requires an upward SMA crossover for buy and a downward crossover for sell and close. Python checks strategy, account rules, visual agreement, evidence legibility, and reviewer acceptance before indicating eligibility. It records the result and PNG without placing orders. [OpenAI Decisions request format](https://developers.openai.com/api/reference/resources/decisions/methods/create)
+
+## Paper automation (Prompt 12)
+
+Vue identifies newly completed candles while a run is enabled. The manual and automatic chart paths share the frozen-chart renderer and PNG export. The automatic path claims the account, strategy, symbol, interval, and candle in SQLite before creating a snapshot or making a provider call. The claim survives stop and restart. The run freezes the timeframe and SMA windows and scopes replay to the chosen account and recorded observation range.
+
+An automation job links the saved decision, simulator order, and fill. Python applies only a valid decision with readable matching chart evidence and an accepting reviewer. The account, symbol, candle, and timeframe must match. The simulator transaction links the outcome to the existing order, fill, cash, position, and P&L records. Stop and fill checks serialize in SQLite. Stop rejects queued automatic orders and retains a late analysis for inspection. The next-observation fill rules include a five-minute decision age limit and reject a received price whose market timestamp predates the cutoff. A backend restart disables existing runs before feed processing starts.
+
+Constructed snapshots are ineligible in the default database. The fixture runner explicitly enables constructed execution only for a replay account in a separate database. Manual analysis has no execution path. The browser panel reads the saved run and can still show its most recent jobs after reload.
+
 ## Future integration flow
 
 ```text

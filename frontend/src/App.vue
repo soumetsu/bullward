@@ -1,17 +1,28 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import CandleChart from './components/CandleChart.vue'
+import ChartDecision from './components/ChartDecision.vue'
 import IndicatorControls from './components/IndicatorControls.vue'
 import PaperAccount from './components/PaperAccount.vue'
+import PaperAutomation from './components/PaperAutomation.vue'
 import ReplayControls from './components/ReplayControls.vue'
 import { toChartData, utcDate, utcTime } from './chartData'
 import './style.css'
 
 const rows = ref([])
 const selectedTime = ref('')
+const selectionPinned = ref(false)
 const loading = ref(true)
 const error = ref('')
 const chart = ref(null)
+const chartDecision = ref(null)
+const decisionBusy = ref(false)
+const replayContext = ref(null)
+const replayControls = ref(null)
+const replayReady = ref(false)
+const automationActive = ref(false)
+const automationBusy = ref(false)
+const smaWindows = ref({ short: 2, long: 3 })
 const mode = new URLSearchParams(location.search).get('source')
 const sample = mode === 'sample'
 const replay = mode === 'replay'
@@ -50,9 +61,15 @@ const price = (value) => value.toFixed(2)
 const count = (value) => value === null ? 'Unknown' : value.toLocaleString('en-US')
 
 function setRows(nextRows) {
-  const followLatest = !selectedTime.value || selectedTime.value === latest.value?.timestamp
+  const followLatest = !selectionPinned.value && selectedTime.value === latest.value?.timestamp
   rows.value = nextRows
+  if (!selected.value) selectionPinned.value = false
   if (followLatest || !selected.value) selectedTime.value = latest.value?.timestamp ?? ''
+}
+
+function selectCandle(timestamp) {
+  selectionPinned.value = true
+  selectedTime.value = timestamp
 }
 
 async function loadSample() {
@@ -119,6 +136,24 @@ function loadHistory() {
   else connect()
 }
 
+function rangeStart(timestamp) {
+  const visibleFrom = chart.value?.visibleRange()?.from
+  const visibleStart = Number.isFinite(visibleFrom) ? new Date(visibleFrom * 1000).toISOString() : null
+  return visibleStart && Date.parse(visibleStart) <= Date.parse(timestamp)
+    ? visibleStart
+    : rows.value.filter((row) => row.timestamp <= timestamp).slice(-60)[0]?.timestamp
+}
+
+function askAboutChart() {
+  if (!selected.value?.ended || (replay && !replayContext.value)) return
+  const timestamp = selected.value.timestamp
+  const { symbol: replaySymbol, start, cursor, through_id, book } = replayContext.value ?? {}
+  chartDecision.value.ask({
+    symbol: replaySymbol ?? symbol, interval: interval.value, timestamp, range_start: rangeStart(timestamp),
+    ...smaWindows.value, replay: replay ? { start, cursor, through_id, book } : null,
+  })
+}
+
 onMounted(() => {
   if (replay || paper) {
     loading.value = false
@@ -149,13 +184,22 @@ onBeforeUnmount(() => {
       <span v-if="sample" class="sample-badge"><span></span> Synthetic one-minute sample</span>
       <div v-else class="chart-actions">
         <label for="timeframe">Timeframe</label>
-        <select id="timeframe" v-model="interval" @change="!replay && connect(true)">
+        <select id="timeframe" v-model="interval" :disabled="automationActive || automationBusy" @change="!replay && connect(true)">
           <option v-for="(label, value) in intervals" :key="value" :value="value">{{ label }}</option>
         </select>
       </div>
     </div>
-    <ReplayControls v-if="replay" :interval="interval" @frame="setRows($event.map(({ candle, ...status }) => ({ ...candle, ...status })))" />
-    <IndicatorControls :rows="rows" :sample="sample" @result="indicators = $event" />
+    <ReplayControls v-if="replay" ref="replayControls" :interval="interval"
+                    :automation-active="automationActive" :automation-busy="automationBusy"
+                    @frame="setRows($event.map(({ candle, ...status }) => ({ ...candle, ...status })))"
+                    @context="replayContext = $event" @ready="replayReady = $event" />
+    <PaperAutomation v-if="!sample" :rows="rows" :symbol="replayContext?.symbol ?? symbol" :interval="interval"
+                     :windows="smaWindows" :replay="replay" :replay-context="replayContext"
+                     :replay-ready="replayReady" :range-start="rangeStart"
+                     @active="automationActive = $event" @busy="automationBusy = $event"
+                     @account-ready="replayControls?.enablePaperAccount()" />
+    <IndicatorControls :rows="rows" :sample="sample" :lock-windows="automationActive || automationBusy"
+                       @result="indicators = $event" @windows="smaWindows = $event" />
     <section v-if="!sample && !replay" class="summary-grid" aria-label="Market feed">
       <div class="summary-card"><span class="label">Instrument</span><strong>{{ symbol }}</strong><span class="muted">{{ intervals[interval] }} · {{ source }}</span></div>
       <div class="summary-card"><span class="label">Latest source observation</span><strong class="numeric">{{ sourceAge }}</strong><span v-if="sourceTime !== null" class="muted">{{ new Date(sourceTime).toISOString() }}</span></div>
@@ -168,14 +212,15 @@ onBeforeUnmount(() => {
       <div class="analysis-grid">
         <section class="panel chart-panel" aria-labelledby="chart-title">
           <div class="panel-heading"><div><h2 id="chart-title">{{ replay ? 'Replay candlestick chart' : 'Candlestick chart' }}</h2><p>{{ !sample && !latest.ended ? 'Latest candle forming' : 'Price above · volume below' }}</p></div><div class="chart-actions"><span class="interval">{{ intervals[interval] }} · UTC</span><button class="quiet" @click="chart?.resetView()">Reset view</button></div></div>
-          <CandleChart ref="chart" :rows="rows" :selected="selectedTime" :indicators="indicators" @select="selectedTime = $event" />
+          <CandleChart ref="chart" :rows="rows" :selected="selectedTime" :indicators="indicators"
+                       @select="selectCandle" @hover="!selectionPinned && (selectedTime = $event)" />
           <div class="chart-footer"><span>Hover or select a candle to inspect its values.</span><span class="legend"><i class="up"></i> Up <i class="down"></i> Down</span></div>
           <div v-if="indicators.series.length" class="indicator-legend">
             <span class="sma-short">{{ indicators.series[0].name }}</span>
             <span class="sma-long">{{ indicators.series[1].name }}</span>
             <span v-if="indicators.crossovers.length">Crossovers</span>
             <button v-for="signal in indicators.crossovers" :key="signal.timestamp" class="quiet"
-                    @click="selectedTime = signal.timestamp">
+                    @click="selectCandle(signal.timestamp)">
               {{ signal.direction === 'up' ? 'SMA crossed up' : 'SMA crossed down' }} · {{ utcDate(signal.timestamp) }} {{ utcTime(signal.timestamp) }} UTC
             </button>
           </div>
@@ -183,10 +228,11 @@ onBeforeUnmount(() => {
         <aside v-if="selected" class="panel inspector" aria-labelledby="inspector-title">
           <p class="eyebrow">CANDLE INSPECTOR</p><h2 id="inspector-title">{{ utcDate(selected.timestamp) }}</h2>
           <label for="candle-time">Candle start · UTC</label>
-          <select id="candle-time" v-model="selectedTime"><option v-for="row in rows" :key="row.timestamp" :value="row.timestamp">{{ sample ? '' : utcDate(row.timestamp) + ' · ' }}{{ utcTime(row.timestamp) }} UTC</option></select>
+          <select id="candle-time" v-model="selectedTime" @change="selectionPinned = true"><option v-for="row in rows" :key="row.timestamp" :value="row.timestamp">{{ sample ? '' : utcDate(row.timestamp) + ' · ' }}{{ utcTime(row.timestamp) }} UTC</option></select>
           <dl class="price-grid"><div v-for="field in ['open', 'high', 'low', 'close']" :key="field"><dt>{{ field }}</dt><dd :data-testid="`selected-${field}`">{{ price(selected[field]) }}</dd></div></dl>
           <div class="volume-detail"><span class="label">Candle volume</span><strong data-testid="selected-volume">{{ count(selected.volume) }} <small v-if="selected.volume !== null">shares</small></strong></div>
           <p v-if="!sample" class="inspector-note">{{ selected.ended ? 'Interval ended' : 'Forming' }} · {{ selected.observed_minutes }} of {{ selected.expected_minutes }} minutes observed</p>
+          <button v-if="!sample" :disabled="decisionBusy || !selected.ended" @click="askAboutChart">Ask about chart</button>
           <dl v-if="selectedIndicators.length" class="indicator-values">
             <div v-for="item in selectedIndicators" :key="item.id">
               <dt>{{ item.name }}</dt><dd>{{ item.value === null ? 'Unavailable' : price(item.value) }}</dd>
@@ -196,9 +242,10 @@ onBeforeUnmount(() => {
       </div>
       <section class="panel data-panel" aria-labelledby="data-title">
         <div class="panel-heading"><h2 id="data-title">Candle data</h2><button v-if="!replay" class="quiet" @click="loadHistory">Refresh data</button></div>
-        <div class="table-scroll"><table><thead><tr><th scope="col">Start (UTC)</th><th scope="col">Open</th><th scope="col">High</th><th scope="col">Low</th><th scope="col">Close</th><th scope="col">Volume (shares)</th></tr></thead><tbody><tr v-for="row in rows" :key="row.timestamp" :class="{ selected: selectedTime === row.timestamp }"><th scope="row"><button class="time-button" :aria-pressed="selectedTime === row.timestamp" @click="selectedTime = row.timestamp">{{ sample ? '' : utcDate(row.timestamp) + ' · ' }}{{ utcTime(row.timestamp) }}</button></th><td>{{ price(row.open) }}</td><td>{{ price(row.high) }}</td><td>{{ price(row.low) }}</td><td>{{ price(row.close) }}</td><td>{{ count(row.volume) }}</td></tr></tbody></table></div>
+        <div class="table-scroll"><table><thead><tr><th scope="col">Start (UTC)</th><th scope="col">Open</th><th scope="col">High</th><th scope="col">Low</th><th scope="col">Close</th><th scope="col">Volume (shares)</th></tr></thead><tbody><tr v-for="row in rows" :key="row.timestamp" :class="{ selected: selectedTime === row.timestamp }"><th scope="row"><button class="time-button" :aria-pressed="selectedTime === row.timestamp" @click="selectCandle(row.timestamp)">{{ sample ? '' : utcDate(row.timestamp) + ' · ' }}{{ utcTime(row.timestamp) }}</button></th><td>{{ price(row.open) }}</td><td>{{ price(row.high) }}</td><td>{{ price(row.low) }}</td><td>{{ price(row.close) }}</td><td>{{ count(row.volume) }}</td></tr></tbody></table></div>
       </section>
     </template>
+    <ChartDecision v-if="!sample" ref="chartDecision" @busy="decisionBusy = $event" />
     <footer class="attribution">TradingView Lightweight Charts™<br>Copyright (с) 2025 TradingView, Inc. <a href="https://www.tradingview.com/" target="_blank" rel="noopener noreferrer">TradingView</a> · <a href="https://tradingview.github.io/lightweight-charts/docs" target="_blank" rel="noopener noreferrer">Chart documentation</a></footer>
   </main>
 </template>

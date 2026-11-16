@@ -2,8 +2,12 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import PaperAccount from './PaperAccount.vue'
 
-const props = defineProps({ interval: { type: String, required: true } })
-const emit = defineEmits(['frame'])
+const props = defineProps({
+  interval: { type: String, required: true },
+  automationActive: Boolean,
+  automationBusy: Boolean,
+})
+const emit = defineEmits(['frame', 'context', 'ready'])
 const catalog = ref(null)
 const symbol = ref('')
 const start = ref('')
@@ -23,6 +27,7 @@ let cursor, selection, request, timer
 const playbackTime = computed(() => observation.value
   ? new Date(observation.value.source_time_ms).toISOString()
   : '')
+const ready = computed(() => Boolean(observation.value && !finished.value && !loading.value && !playing.value && !ordering.value))
 
 async function readJson(url, signal, method = 'GET') {
   const response = await fetch(url, { signal, method, cache: 'no-store' })
@@ -53,6 +58,7 @@ function reset() {
   error.value = ''
   status.value = ''
   emit('frame', [])
+  emit('context', null)
 }
 
 function selectSymbol() {
@@ -61,6 +67,18 @@ function selectSymbol() {
   if (!saved) return
   start.value = saved.first_receipt.slice(0, 19)
   end.value = new Date(Math.floor(Date.parse(saved.last_receipt) / 1000) * 1000 + 1000).toISOString().slice(0, 19)
+}
+
+function publishContext() {
+  emit('context', {
+    symbol: selection.symbol, start: selection.start, cursor: cursor.id,
+    through_id: cursor.throughId, book: hasOrders.value ? book.value : null, runBook: book.value,
+  })
+}
+
+function orderSubmitted() {
+  hasOrders.value = true
+  publishContext()
 }
 
 async function loadCatalog() {
@@ -78,6 +96,10 @@ async function loadCatalog() {
 
 async function advance() {
   if (!selection || loading.value || finished.value || ordering.value) return
+  if (props.automationBusy) {
+    if (playing.value) timer = setTimeout(advance, 350)
+    return
+  }
   const query = new URLSearchParams(selection)
   if (cursor) {
     query.set('after_id', cursor.id)
@@ -97,6 +119,7 @@ async function advance() {
     finished.value = frame.done
     if (frame.observation) {
       cursor = { id: frame.observation.id, throughId: frame.through_id }
+      publishContext()
       status.value = frame.done ? 'Replay complete' : 'Replay ready'
     } else {
       status.value = 'No recorded observations in this range.'
@@ -129,11 +152,13 @@ function togglePlay() {
 }
 
 watch(() => props.interval, reset)
+watch(ready, (available) => emit('ready', available), { immediate: true, flush: 'sync' })
 onMounted(loadCatalog)
 onBeforeUnmount(() => {
   pause()
   request?.abort()
 })
+defineExpose({ enablePaperAccount: orderSubmitted })
 </script>
 
 <template>
@@ -145,22 +170,22 @@ onBeforeUnmount(() => {
       <p v-if="!catalog.symbols.length" role="status">No recorded observations are available.</p>
       <form v-else @submit.prevent="startReplay">
         <label>Saved symbol
-          <select v-model="symbol" @change="selectSymbol">
+          <select v-model="symbol" :disabled="automationActive || automationBusy" @change="selectSymbol">
             <option v-for="item in catalog.symbols" :key="item.symbol">{{ item.symbol }}</option>
           </select>
         </label>
         <label>Start receipt (UTC)
-          <input v-model="start" type="datetime-local" step="1" required @input="reset">
+          <input v-model="start" type="datetime-local" step="1" required :disabled="automationActive || automationBusy" @input="reset">
         </label>
         <label>End before (UTC)
-          <input v-model="end" type="datetime-local" step="1" required @input="reset">
+          <input v-model="end" type="datetime-local" step="1" required :disabled="automationActive || automationBusy" @input="reset">
         </label>
-        <button type="submit" :disabled="loading || playing">{{ observation ? 'Restart replay' : 'Start replay' }}</button>
+        <button type="submit" :disabled="loading || playing || automationActive || automationBusy">{{ observation ? 'Restart replay' : 'Start replay' }}</button>
       </form>
     </template>
     <div v-if="observation" class="replay-progress">
-      <button @click="togglePlay" :disabled="ordering || finished || (loading && !playing)">{{ playing ? 'Pause' : 'Play' }}</button>
-      <button @click="advance" :disabled="ordering || loading || playing || finished">Next observation</button>
+      <button @click="togglePlay" :disabled="ordering || finished || (!playing && (loading || automationBusy))">{{ playing ? 'Pause' : 'Play' }}</button>
+      <button @click="advance" :disabled="ordering || loading || playing || finished || automationBusy">Next observation</button>
       <dl>
         <div><dt>Source time (UTC)</dt><dd>{{ playbackTime }}</dd></div>
         <div><dt>Recorded receipt (UTC)</dt><dd>{{ observation.received_at }}</dd></div>
@@ -170,5 +195,7 @@ onBeforeUnmount(() => {
     <p v-if="observation && !hasCandles" class="muted">No regular-session candle at this point in the replay.</p>
   </section>
   <PaperAccount v-if="observation" :key="book" :book="book" :symbol="symbol" :cursor="observation.id"
-                :locked="loading || playing || finished" @ordered="hasOrders = true" @busy="ordering = $event" />
+                :locked="loading || playing || finished || automationBusy"
+                @ordered="orderSubmitted"
+                @busy="ordering = $event" />
 </template>

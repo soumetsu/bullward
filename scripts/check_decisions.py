@@ -1,23 +1,29 @@
 """Exercise the local Decisions API over HTTP with a separate, constructed database."""
 
 import argparse
+from base64 import b64encode
+from binascii import crc32
 from contextlib import closing
 from functools import partial
+from hashlib import sha256
 from io import BytesIO
 import json
 import os
 from pathlib import Path
 import sqlite3
+from struct import pack
 import subprocess
 import sys
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 from urllib.request import Request, urlopen
 from uuid import uuid4
+import zlib
 
 import uvicorn
 
 from backend import main
+from backend.chart_capture import DATA_PREFIX, PNG_SIGNATURE, TAG, decode_capture
 from backend.decisions import ask_openai, request_decision
 from backend.observations import record_observation
 from backend.paper import advance_replay_account, execute_action
@@ -51,29 +57,103 @@ def setup_account(database):
     }
 
 
-def serve(port, live):
+def setup_review_market(database, hour, scale):
+    ids = []
+    for index, price in enumerate((13, 10, 7, 13, 19, 7)):
+        received_at = at(f"{hour}:{index:02d}:05")
+        ids.append(record_observation(database, {
+            "id": "AAPL", "time": int(received_at.timestamp() * 1000), "price": price * scale,
+        }, received_at))
+    book = str(uuid4())
+    execute_action(database, book, "AAPL", "buy", str(uuid4()), 1, ids[0])
+    return {"timestamp": f"2026-11-09T{hour}:04:00Z",
+            "replay": {"start": f"2026-11-09T{hour}:00:00Z", "cursor": ids[-1],
+                       "through_id": ids[-1], "book": book}}
+
+
+def fixture_png(snapshot_id):
+    def chunk(kind, content):
+        return pack(">I", len(content)) + kind + content + pack(">I", crc32(kind + content))
+
+    png = (PNG_SIGNATURE + chunk(b"IHDR", pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0))
+           + chunk(b"tEXt", TAG + snapshot_id.encode())
+           + chunk(b"IDAT", zlib.compress(b"\x00\xff\xff\xff")) + chunk(b"IEND", b""))
+    return DATA_PREFIX + b64encode(png).decode()
+
+
+def serve(port, live, chart=False):
     if live:
         uvicorn.run(main.app, host="127.0.0.1", port=port)
         return
-    answers = iter(("hold", "timeout", "wrong_question", "wait", "sell"))
+    legacy_answers = iter(("hold", "timeout", "wrong_question", "wait", "sell"))
+    affordable_verdicts = iter(("accept", "reject_unsupported_signal"))
+    images = {}
+    snapshot_facts = {}
 
     def transport(request, timeout):
         assert request.full_url == "https://api.openai.com/v1/decisions" and timeout > 0
         assert request.get_method() == "POST"
         payload = json.loads(request.data)
         assert payload["model"] == "gpt-6-luna"
-        assert payload["input"][0]["content"][0]["type"] == "input_json"
-        evidence = payload["input"][0]["content"][0]["data"]
-        assert evidence["snapshot_id"] and evidence["close"] == 95 and evidence["account"]["shares"] == 3
-        question, = payload["questions"]
-        assert question["name"] == "paper_action" and question["type"] == "choice"
-        assert {choice["value"] for choice in question["choices"]} == {"buy", "sell", "hold", "wait", "close"}
-        action = next(answers)
-        if action == "timeout":
-            raise TimeoutError
-        name = "unexpected" if action == "wrong_question" else "paper_action"
+        message, = payload["input"]
+        assert message["role"] == "user" and message["content"][0]["type"] == "input_json"
+        evidence = message["content"][0]["data"]
+        snapshot_id = evidence["snapshot_id"]
+        names = [question["name"] for question in payload["questions"]]
+        is_review = names == ["verdict"]
+        if is_review:
+            assert {key: value for key, value in evidence.items() if key != "review"} == snapshot_facts.pop(snapshot_id)
+        else:
+            snapshot_facts[snapshot_id] = evidence
+        digest = ""
+        if len(message["content"]) == 2:
+            image_part = message["content"][1]
+            assert image_part["type"] == "input_image"
+            png, tag = decode_capture(image_part["image_url"])
+            assert tag == snapshot_id
+            assert evidence["chart_range"]["to"] == evidence["candle_timestamp"]
+            digest = sha256(png).hexdigest()
+            if is_review:
+                assert images.pop(snapshot_id) == (digest, evidence["chart_range"])
+                assert evidence["review"]["analyst_answers"]["action"] == evidence["review"]["proposal"]
+            else:
+                assert names == ["action", "crossover", "evidence"]
+                images[snapshot_id] = (digest, evidence["chart_range"])
+
+        if chart:
+            assert digest and evidence["close"] == 19 and evidence["sma"]["crossover"] == "up"
+            choices = {"verdict": "accept"} if is_review else {
+                "action": "buy", "crossover": "up", "evidence": "sufficient",
+            }
+        elif digest:
+            case = evidence["sma"]["short_window"]
+            if is_review and case == 5:
+                raise TimeoutError
+            choices = {"verdict": "accept"} if is_review else {
+                "action": "wait", "crossover": "down" if case == 2 else "unreadable" if case == 3 else "none",
+                **({"evidence": "sufficient"} if case != 4 else {}),
+            }
+        elif is_review:
+            assert evidence["review"]["analyst_answers"]["paper_action"] == evidence["review"]["proposal"]
+            verdict = next(affordable_verdicts) if evidence["close"] == 19 else "accept"
+            choices = {"verdict": verdict}
+        else:
+            question, = payload["questions"]
+            assert names == ["paper_action"] and question["type"] == "choice"
+            assert {choice["value"] for choice in question["choices"]} == {"buy", "sell", "hold", "wait", "close"}
+            if evidence["close"] == 95:
+                assert evidence["account"]["shares"] == 3
+                action = next(legacy_answers)
+            else:
+                assert evidence["close"] in (19, 1900) and evidence["sma"]["crossover"] == "up"
+                action = "buy"
+            if action == "timeout":
+                raise TimeoutError
+            choices = {"unexpected" if action == "wrong_question" else "paper_action": action}
+        role = "reviewer" if is_review else "analyst"
         return BytesIO(json.dumps({
-            "id": "fixture_response", "answers": [{"type": "choice", "name": name, "choice": action}],
+            "id": f"fixture-{role}-{digest or 'text'}",
+            "answers": [{"type": "choice", "name": name, "choice": value} for name, value in choices.items()],
         }).encode())
 
     with (
@@ -98,7 +178,7 @@ def call(url, path, payload=None):
         return json.load(response)
 
 
-def check(database, url, selection, live):
+def check(database, url, selection, live, review_selections):
     before = ledger(database)
     snapshot = call(url, "/api/decision-snapshots", selection)
     facts = snapshot["facts"]
@@ -115,10 +195,10 @@ def check(database, url, selection, live):
                for _ in range(1 if live else 5)]
     if not live:
         assert [row["status"] for row in results] == [
-            "valid", "timeout", "malformed_answer", "invalid_proposal", "valid",
+            "valid", "timeout", "malformed_answer", "invalid_proposal", "invalid_proposal",
         ]
         assert results[0]["proposal"] == "hold" and results[0]["quantity"] is None
-        assert results[-1]["proposal"] == "sell" and results[-1]["quantity"] == facts["order_size"]
+        assert results[-1]["proposal"] == "sell" and "confirmed down" in results[-1]["explanation"]
         assert results[0]["model_call"] == "returned" and results[1]["model_call"] == "attempted"
         incomplete = call(url, "/api/decision-snapshots", {**selection, "long": 25})
         results.extend([
@@ -135,9 +215,44 @@ def check(database, url, selection, live):
     print(f"SQLite readback and unchanged paper ledger verified. Results: {[row['status'] for row in results]}.")
     if live:
         result, = results
-        print(f"Provider {result['provider']}, model {result['model']}, call {result['model_call']}, "
-              f"local decision {result['id']}, provider decision {result['provider_decision_id']}.")
-        return 0 if result["proposal"] and result["model_call"] == "returned" else 2
+        print(f"Provider {result['provider']}, model {result['model']}, local decision {result['id']}.")
+        for name in ("analyst", "reviewer"):
+            role = result[name]
+            print(f"{name}: {role['call']}, {role['answers']}, provider ID {role['provider_decision_id']}")
+        return 0 if all(result[role]["call"] == "returned" for role in ("analyst", "reviewer")) else 2
+    affordable, expensive = [call(url, "/api/decision-snapshots", selection) for selection in review_selections]
+    decisions = [call(url, "/api/decisions", {"snapshot_id": item["id"]})
+                 for item in (affordable, affordable, expensive)]
+    assert [row["status"] for row in decisions] == ["valid", "review_rejected", "invalid_proposal"]
+    assert [row["eligible_for_paper_order"] for row in decisions] == [True, False, False]
+    assert "1900" in decisions[-1]["explanation"] and "Cash" in decisions[-1]["explanation"]
+    for decision in decisions:
+        assert call(url, f"/api/decisions/{decision['id']}") == decision
+        assert decision["analyst"]["answers"]["paper_action"] == "buy"
+        assert decision["reviewer"]["call"] == "returned"
+    bad_input = (
+        ("data:image/png;base64,YmFk", "invalid_capture"),
+        (fixture_png(str(uuid4())), "capture_mismatch"),
+    )
+    for image, status in bad_input:
+        invalid = call(url, "/api/decisions", {"snapshot_id": snapshot["id"], "image_url": image})
+        assert invalid["status"] == status and invalid["model_call"] == "not_sent"
+    for window, expected in [(2, "conflicting_signal"), (3, "insufficient_visual_evidence"),
+                             (4, "malformed_answer"), (5, "review_timeout")]:
+        long = max(3, window + 1)
+        visual = call(url, "/api/decision-snapshots", {**review_selections[0], "short": window, "long": long,
+                                                       "timestamp": review_selections[0]["timestamp"] if window < 5
+                                                       else "2026-11-09T15:05:00Z",
+                                                       "replay": None})
+        if window == 5:
+            # A later recorded observation and historical context permit a six-candle window.
+            assert not visual["missing"]
+        result = call(url, "/api/decisions", {"snapshot_id": visual["id"], "image_url": fixture_png(visual["id"])})
+        assert result["status"] == expected, result
+        assert not result["eligible_for_paper_order"]
+    assert ledger(database) == before
+    print("Review readback verified: agreed eligible buy, reviewer rejection, and unaffordable accepted buy.")
+    print("Capture failures verified: invalid PNG, mismatch, conflicting/unreadable signal, missing answer, reviewer timeout.")
     return 0
 
 
@@ -145,6 +260,9 @@ def run(live):
     with TemporaryDirectory(prefix="invest-decisions-", dir=ROOT / "backend/data") as directory:
         database = Path(directory) / "observations.sqlite3"
         selection = setup_account(database)
+        review_selections = [] if live else [
+            setup_review_market(database, "15", 1), setup_review_market(database, "16", 100),
+        ]
         port = free_port()
         url = f"http://127.0.0.1:{port}"
         env = dict(os.environ, INVEST_OBSERVATIONS_DB=str(database), INVEST_LIVE_FEED="0",
@@ -157,7 +275,7 @@ def run(live):
                                        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
             try:
                 wait_ready(url + "/api/health", process)
-                return check(database, url, selection, live)
+                return check(database, url, selection, live, review_selections)
             except Exception:
                 log.seek(0)
                 print(log.read(), file=sys.stderr)
@@ -171,8 +289,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--live", action="store_true", help="Use a live provider with constructed market data.")
     parser.add_argument("--serve", type=int, help=argparse.SUPPRESS)
+    parser.add_argument("--chart", action="store_true", help=argparse.SUPPRESS)
     options = parser.parse_args()
     if options.serve:
-        serve(options.serve, options.live)
+        serve(options.serve, options.live, options.chart)
     else:
         raise SystemExit(run(options.live))

@@ -8,11 +8,13 @@ from pathlib import Path
 from typing import Annotated, Literal
 from uuid import UUID
 
-from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 
 from .candles import load_observed_minutes
-from .decisions import DecisionRequest, SnapshotRequest, create_snapshot, get_decision, get_snapshot, request_decision
+from .decisions import (
+    DecisionRequest, SnapshotRequest, create_snapshot, get_capture, get_decision, get_snapshot, request_decision,
+)
 from .indicators import (
     IndicatorConfig, IndicatorRequest, available_types, calculate_indicators,
     configurations, save_configuration,
@@ -20,6 +22,10 @@ from .indicators import (
 from .live_feed import LiveFeed, SYMBOL
 from .observations import DEFAULT_DB_PATH, initialize_database
 from .paper import LIVE_BOOK, advance_replay_account, execute_action, paper_state, process_live_account
+from .paper_automation import (
+    AutomationAnalysis, AutomationStart, analyze_candle, automation_state, claim_candle,
+    start_automation, stop_automation, stop_previous_runs,
+)
 from .replay import recorded_symbols, replay_step
 from .timeframes import aggregate_candles
 
@@ -55,6 +61,7 @@ async def lifespan(app):
     enabled = os.environ.get("INVEST_LIVE_FEED", "1") != "0"
     if enabled or not database.exists():
         await asyncio.to_thread(initialize_database, database)
+    await asyncio.to_thread(stop_previous_runs, database)
     if enabled:
         tasks = [
             asyncio.create_task(app.state.feed.run()),
@@ -198,6 +205,46 @@ def freeze_decision_snapshot(selection: SnapshotRequest):
         raise HTTPException(status_code=422, detail=str(error)) from error
 
 
+@app.post("/api/paper/automation/start", status_code=201)
+def start_paper_automation(settings: AutomationStart):
+    try:
+        return start_automation(app.state.feed.db_path, settings)
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.get("/api/paper/automation/{run_id}")
+def read_paper_automation(run_id: UUID):
+    try:
+        return automation_state(app.state.feed.db_path, str(run_id))
+    except ValueError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@app.post("/api/paper/automation/{run_id}/stop")
+def stop_paper_automation(run_id: UUID):
+    try:
+        return stop_automation(app.state.feed.db_path, str(run_id))
+    except ValueError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@app.post("/api/paper/automation/{run_id}/candles")
+def prepare_paper_candle(run_id: UUID, selection: SnapshotRequest):
+    try:
+        return claim_candle(app.state.feed.db_path, str(run_id), selection, app.state.source_label)
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.post("/api/paper/automation/{run_id}/jobs/{job_id}/analyze")
+def analyze_paper_candle(run_id: UUID, job_id: UUID, request: AutomationAnalysis):
+    try:
+        return analyze_candle(app.state.feed.db_path, str(run_id), str(job_id), request, request_decision)
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
 @app.get("/api/decision-snapshots/{snapshot_id}")
 def read_decision_snapshot(snapshot_id: UUID):
     snapshot = get_snapshot(app.state.feed.db_path, str(snapshot_id))
@@ -209,7 +256,7 @@ def read_decision_snapshot(snapshot_id: UUID):
 @app.post("/api/decisions", status_code=201)
 def decide(request: DecisionRequest | None = None):
     snapshot_id = str(request.snapshot_id) if request and request.snapshot_id else None
-    return request_decision(app.state.feed.db_path, snapshot_id)
+    return request_decision(app.state.feed.db_path, snapshot_id, image_url=request.image_url if request else None)
 
 
 @app.get("/api/decisions/{decision_id}")
@@ -218,6 +265,14 @@ def read_decision(decision_id: UUID):
     if decision is None:
         raise HTTPException(status_code=404, detail="Decision not found.")
     return decision
+
+
+@app.get("/api/decisions/{decision_id}/capture")
+def read_decision_capture(decision_id: UUID):
+    png = get_capture(app.state.feed.db_path, str(decision_id))
+    if png is None:
+        raise HTTPException(status_code=404, detail="Chart capture not found.")
+    return Response(png, media_type="image/png", headers={"X-Content-Type-Options": "nosniff"})
 
 
 @app.websocket("/api/candles/live")

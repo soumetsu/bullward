@@ -219,4 +219,22 @@ Post `{"snapshot_id": "<snapshot UUID>"}` to `POST /api/decisions`. The result s
 
 The OpenAI provider uses the backend's `OPENAI_API_KEY` environment variable. The root `.env` is a local placeholder and the app does not load it automatically. Run `python -m scripts.check_decisions` for the local HTTP smoke test with a controlled provider. To make one real OpenAI request against a separate constructed database, supply the key in the environment and run `python -m scripts.check_decisions --live`. [OpenAI Decisions API](https://developers.openai.com/api/docs/guides/decisions)
 
-Prompt 10A covers a chart screenshot for the Decisions API.
+## Ask about chart and review
+
+In the live chart or Replay, select a completed candle and click **Ask about chart**. The dashboard freezes the visible chart range through that candle, exports a PNG, and shows the preview and UTC cutoff. The analyst answers **action**, **crossover**, and **evidence**. The reviewer sees the same snapshot, the same PNG, and the analyst's answers before returning a verdict. The result compares the reported crossover with Python's calculation. **Open saved PNG** retrieves the original capture by decision ID.
+
+The prototype requires an upward SMA crossover for a buy and a downward crossover for a sell or close. Python also checks cash, position, and size. The review can withhold eligibility. An accepted review still needs to pass Python's checks. The chart analysis leaves paper orders and balances untouched.
+
+Run `python scripts/smoke_test.py --chart` for the browser workflow with a controlled provider. Choose **SMA** in Replay, play to the end, select the 14:34 UTC candle, and click **Ask about chart**. Expect a cutoff of 14:35 UTC, analyst answers buy/up/sufficient, and reviewer accept. The runner checks storage and zero orders. With `OPENAI_API_KEY` available to FastAPI, run `python scripts/smoke_test.py --chart-live` on the same constructed chart. Run `python -m scripts.check_decisions` to exercise fixed reviewer results and capture validation through HTTP.
+
+## Paper automation
+
+On the live chart or in a paused Replay, choose the interval and SMA windows, then select **Start paper automation**. Keep the dashboard open. The automation starts with the next completed candle and saves a separate chart capture and review for each newly completed candle. In Replay, playback waits for analysis before moving to the next observation. The automation table shows the crossover, proposal, verdict, saved decision ID, and order or skip.
+
+An accepted, eligible buy, sell, or close queues a paper order for the next observed price after submission. Cash and shares are checked again at the fill. The decision expires five minutes after the candle close. Replay uses its recorded clock for this check. A newly received price from before the cutoff is skipped. Hold and wait create no order. **Stop paper automation** cancels pending automated orders and prevents later model replies from placing orders. Restarting FastAPI disarms prior runs while keeping their history.
+
+Constructed data may trade only in a disposable replay account. The browser check creates one in a separate database and uses fixed provider replies. Run `python -m scripts.check_automation` for the duplicate, Stop, and expiry checks and `python scripts/smoke_test.py --automation` for the browser check.
+
+For the browser fixture, start Replay and step to the 14:34:05 UTC observation. Start automation. Step to 14:35:05 for the approval and pending order, 14:35:15 for a fill at $7, and 14:36:05 for a reviewer veto. Compare cash of $993, one share, and both decision links. Stop automation, then confirm the smoke test. It repeats the approved request and checks SQLite for one fill.
+
+Prompt 13 covers discussing a recorded decision by voice.

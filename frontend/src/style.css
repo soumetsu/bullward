@@ -92,3 +92,13 @@ tr.selected { background: #edf6f0; }
 .indicator-legend { padding: 10px 14px; align-items: center; font-size: 13px; }
 .sma-short { color: #385bbc; }
 .sma-long { color: #ad5920; }
+.capture-render { position: fixed; left: -1500px; top: 0; width: 960px; pointer-events: none; }
+.chart-decision { margin-top: 22px; }
+.chart-decision figure { margin: 12px 0; }
+.chart-decision img { display: block; max-width: 100%; height: auto; border: 1px solid #dfe6df; border-radius: 8px; }
+.chart-decision figcaption { margin-top: 8px; color: #52655a; }
+.decision-roles { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 16px; }
+.decision-roles section { padding: 12px; border: 1px solid #dfe6df; border-radius: 8px; }
+.decision-roles dt { font-size: 13px; text-transform: none; }
+.decision-roles dd { margin: 4px 0 0; font-size: 16px; }
+.automation-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }

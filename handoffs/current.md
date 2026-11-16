@@ -4,7 +4,7 @@ Updated: 2026-11-15
 
 ## Current handoff
 
-The repository is on `main`. Prompts 9 and 9A–9D were pushed to `origin/main` as `95d6f02`. Prompt 10 is implemented in the working tree for review. The numbered sections below preserve each session's record.
+The repository is on `main`. Prompt 10 was pushed to `origin/main` as `948c42e`. Prompts 10A, 11, and 12 are implemented in the working tree for review. The numbered sections below preserve each session's record.
 
 ## Project and root
 
@@ -115,3 +115,19 @@ Next implementation prompt when requested: Prompt 10. The working tree awaits re
 `python -m scripts.check_decisions` passed outside the sandbox after a local health timeout. It checked the original $95 close, $710 and 3 shares, valid hold, timeout, malformed answer, invalid proposal, missing evidence, and unchanged paper rows. `python -m scripts.check_decisions --live` recorded `provider_unconfigured` and exited 2. Install no key in source or chat. Use `OPENAI_API_KEY` in the backend process environment for live verification on the same constructed fixture. The market-hours Yahoo check remains independent and pending. Earlier Prompt 9 and frontend regressions passed.
 
 FastAPI on port 8001 and Vite on port 5175 are running. The OpenAPI document confirms both new POST routes. Next implementation prompt when requested: Prompt 10A. Prompt 10 awaits review before commit.
+
+## Prompts 10A and 11
+
+`frontend/src/components/ChartDecision.vue` renders and exports a frozen chart. `frontend/src/chartCapture.js` tags the PNG with its snapshot ID. `backend/chart_capture.py` validates the PNG, and `backend/decisions.py` makes the independent analyst and reviewer calls, compares the chart answer with Python, and saves the outputs and capture. FastAPI serves PNG readback. The prototype strategy is upward SMA cross for buy and downward cross for sell or close, with existing paper account rules enforced. No dependencies changed.
+
+`python scripts/smoke_test.py --chart` passed against the isolated browser fixture. The cutoff was 14:35 UTC, both roles received the same PNG, and SQLite held zero orders. Fixed-review cases and capture rejection paths passed with `python -m scripts.check_decisions`. Initial browser hover could override selection. Explicit selection now stays pinned, and the final browser run verified the selected candle and saved PNG. Live chart and text flows reached `provider_unconfigured`; repeat with `OPENAI_API_KEY` available to the backend to verify real outputs. See `docs/verification.md`.
+
+Next implementation prompt when requested: Prompt 12. Prompts 10A and 11 await review before commit. The previous market-hours check remains independent and pending.
+
+## Prompt 12
+
+`backend/paper_automation.py` and FastAPI routes persist scoped runs and one claim per completed candle. The simulator uses the same ledger transaction to link approved automation orders and their fills or skips. The Vue controls and decision history are in `frontend/src/components/PaperAutomation.vue`. `FrozenChartCapture.vue` supplies the same export to manual and automatic analysis. The next eligible price fills the paper order within five minutes of the candle close. Stop and restart disarm pending automation. Constructed orders are permitted only in the disposable replay fixture. No dependencies changed.
+
+`python -m scripts.check_automation` and `python scripts/smoke_test.py --automation` passed. The browser and SQLite both showed one fill at $7, cash $993, one share, and a separate vetoed proposal. A retry left the ledger unchanged. The startup-handler, missing-capture, Stop, and expiry checks passed. See `docs/verification.md` for the exact checks. Replies were controlled, and live market and OpenAI checks remain pending.
+
+The development backend on port 8001 and the dashboard on port 5175 are running with Prompt 12. Next implementation prompt when requested: Prompt 13. Prompts 10A, 11, and 12 await review before commit.

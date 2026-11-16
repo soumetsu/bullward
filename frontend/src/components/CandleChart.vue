@@ -8,7 +8,7 @@ const props = defineProps({
   selected: { type: String, default: '' },
   indicators: { type: Object, required: true },
 })
-const emit = defineEmits(['select'])
+const emit = defineEmits(['select', 'hover'])
 const host = ref(null)
 let chart, priceSeries, volumeSeries
 let markers
@@ -19,6 +19,8 @@ function showSelection(timestamp) {
   if (row) chart?.setCrosshairPosition(row.close, row.time, priceSeries)
 }
 function resetView() { chart?.timeScale().fitContent() }
+function visibleRange() { return chart?.timeScale().getVisibleRange() }
+function screenshot() { return chart.takeScreenshot(true, false) }
 function showIndicators() {
   if (!chart) return
   const active = new Set()
@@ -86,9 +88,12 @@ onMounted(() => {
   volumeSeries = chart.addSeries(HistogramSeries, { priceFormat: { type: 'volume' }, lastValueVisible: false, priceLineVisible: false }, 1)
   chart.panes()[0].setStretchFactor(3)
   chart.panes()[1].setStretchFactor(1)
-  const select = ({ time }) => { const row = byTime.get(time); if (row) emit('select', row.timestamp) }
-  chart.subscribeCrosshairMove(select)
-  chart.subscribeClick(select)
+  function inspect(event, { time }) {
+    const row = byTime.get(time)
+    if (row) emit(event, row.timestamp)
+  }
+  chart.subscribeCrosshairMove((point) => inspect('hover', point))
+  chart.subscribeClick((point) => inspect('select', point))
   load(props.rows)
   showIndicators()
 })
@@ -96,7 +101,7 @@ watch(() => props.rows, load)
 watch(() => props.selected, showSelection)
 watch(() => props.indicators, showIndicators)
 onBeforeUnmount(() => chart?.remove())
-defineExpose({ resetView })
+defineExpose({ resetView, visibleRange, screenshot })
 </script>
 
 <template>

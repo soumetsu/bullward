@@ -328,3 +328,37 @@ Committed and pushed the reviewed Prompt 9 changes to `origin/main` as `95d6f02`
 The market and provider checks are independent. The regular AAPL session is closed on the weekend, and Prompt 10's provider smoke test uses constructed candles. The prior market-hours quote check remains pending. [Nasdaq trading hours](https://www.nasdaq.com/market-activity/stock-market-holiday-schedule)
 
 Restarted the development FastAPI process. Backend health, frontend, proxied paper account, and OpenAPI returned HTTP 200. The served OpenAPI document includes both Decisions POST routes.
+
+## Prompts 10A and 11
+
+Pushed reviewed Prompt 10 as `948c42e` to `origin/main`. The current Python and Node environments were reused. No software, dependency manifests, or lockfiles changed. Checked the [OpenAI Decisions request format](https://developers.openai.com/api/reference/resources/decisions/methods/create) and [Lightweight Charts export example](https://tradingview.github.io/lightweight-charts/examples/data/screenshot).
+
+| Check | Observed |
+|---|---|
+| `python scripts/smoke_test.py --chart` in browser-result-file mode | Selected the constructed SMA recording and 14:34 UTC candle. The 960 × 440 preview showed the selected price of 19, both SMA lines, the upward marker, and volume bars of 40, 60, 80, and 100. The caption showed a 14:35 UTC cutoff. The analyst returned buy/up/sufficient and the reviewer returned accept. Python reported the matching upward crossover. |
+| Capture readback | The provider fixture decoded both images and validated the common snapshot, original range, PNG tag, and byte digest. The local preview and saved PNG opened in the browser. The result and retrievable 25,796-byte PNG matched SQLite; the paper order count was zero. |
+| `python -m scripts.check_decisions` | Fixed text replies passed three saved-review cases: an eligible buy at 19 with 1,000 cash and an accepting reviewer, a reviewer rejection, and a buy at 1,900 with 1,000 cash accepted by the reviewer but blocked by Python. The eligibility fixtures exercised recorded-format observations in a disposable constructed database. No requests went to OpenAI. |
+| Failure cases | The same HTTP check rejected an invalid PNG and mismatched snapshot tag before either call. Conflicting crossover, unreadable crossover, a missing named answer, and a reviewer timeout each produced an ineligible result. Earlier Prompt 10 hold, timeout, malformed answer, and missing-input cases also passed. Paper rows were unchanged. |
+| `python scripts/smoke_test.py --chart-live` | The same constructed chart preview and exact cutoff were captured and saved. The backend reported `provider_unconfigured` for the analyst and `not_run` for the reviewer. No OpenAI answers were obtained because `OPENAI_API_KEY` was absent. |
+| `python -m scripts.check_decisions --live` | Saved `provider_unconfigured` and both roles' call states `not_sent`. Exited 2. The actual live chart and live two-call checks remain pending. |
+| Regressions | Prompt 9 indicators and paper checks, replay, frontend adapter checks, and Vite build passed. |
+
+The first browser capture exercised an SMA fixture with unknown volume. Added volume observations for the second pass. During the second pass, chart hover changed the explicitly selected candle before capture. Pinned selections from the chart click, inspector dropdown, crossover button, and candle table, then reran the browser flow. The final preview and saved record retained the 14:35 UTC cutoff as intended. Both browser runners removed their temporary processes and databases.
+
+Restarted the project development backend. FastAPI health, Vite, and the served OpenAPI document returned HTTP 200. OpenAPI lists the saved PNG route.
+
+## Prompt 12
+
+Reused Windows 10.0.26200.0, Python 3.14.8, Node 24.21.0, npm 11.19.0, and the existing Python and frontend packages. `python -m pip check` found no dependency conflicts. No dependencies or manifests changed.
+
+| Check | Expected and observed |
+|---|---|
+| `python -m scripts.check_automation` | One approved buy at $7 from $1,000 left $993 cash and one share. Applying the same saved decision and resubmitting analysis created no extra order. Reopening the persisted run through the backend startup handler disabled it, and claiming the same candle in a new run returned `already_handled`. A manual chart question created no order. |
+| Stop, capture, and expiry checks | A late model reply stayed linked with a skipped outcome. A pending order stopped before the next observation never filled. A missing capture recorded a skip. A decision older than five minutes skipped at the fill. Constructed evidence outside disposable test mode placed no orders. |
+| `python scripts/smoke_test.py --automation --no-open --browser-timeout 14400 --browser-result-file .smoke-automation-result.txt` | Passed. Browser Start showed $1,000 and zero shares. The 14:34 UTC candle displayed up/buy/accept and queued an order. The next recorded observation filled one share at $7. The 14:35 candle displayed hold and `reject_unsupported_signal`. After Stop, the browser showed $993, one share, and both decision links. |
+| Browser smoke database readback | The two freshly exported PNGs matched the byte digests seen by both fixture roles. Exactly one order, one fill, and one fill P&L row persisted. An HTTP retry returned the original decision and order IDs. Cash and shares still read $993 and one. The runner exited 0 and stopped its disposable services. |
+| Regression checks | The Decisions and review, replay, minute candles, timeframe, paper-account and indicator checks passed. The frontend adapter tests and Vite build passed. |
+
+All Prompt 12 proposals and verdicts were controlled fixture replies on constructed observations. Live provider and market verification remain pending from earlier prompts.
+
+Restarted the local development backend and left both services running. FastAPI health, the dashboard, proxied health, and OpenAPI each returned HTTP 200. OpenAPI confirmed the paper automation start route.

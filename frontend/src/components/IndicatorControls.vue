@@ -2,8 +2,8 @@
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { postJson, requestJson } from '../api'
 
-const props = defineProps({ rows: { type: Array, required: true }, sample: Boolean })
-const emit = defineEmits(['result'])
+const props = defineProps({ rows: { type: Array, required: true }, sample: Boolean, lockWindows: Boolean })
+const emit = defineEmits(['result', 'windows'])
 const catalog = ref(null)
 const shortInput = ref(2)
 const longInput = ref(3)
@@ -25,6 +25,7 @@ function applyWindows() {
   }
   pairError.value = ''
   pair.value = { short: shortInput.value, long: longInput.value }
+  emit('windows', pair.value)
 }
 
 async function save() {
@@ -88,7 +89,7 @@ onBeforeUnmount(() => pending?.abort())
     <form class="tool-form" @submit.prevent="applyWindows" novalidate>
       <label>Short SMA window <input v-model.number="shortInput" type="number" min="1" step="1"></label>
       <label>Long SMA window <input v-model.number="longInput" type="number" min="2" step="1"></label>
-      <button>Apply SMA windows</button>
+      <button :disabled="lockWindows">Apply SMA windows</button>
     </form>
     <p v-if="pairError" role="alert">{{ pairError }}</p>
     <p v-if="calculationError" role="alert">{{ calculationError }}</p>

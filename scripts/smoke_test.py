@@ -7,6 +7,7 @@ No source edits, additional packages, or stored data are required.
 import argparse
 from contextlib import closing
 from decimal import Decimal
+from hashlib import sha256
 import json
 import os
 from pathlib import Path
@@ -62,6 +63,86 @@ def retry_first_order(database, frontend_url):
     print('HTTP retry returned the same paper order #1.', flush=True)
 
 
+def check_chart_decision(database, frontend_url, live):
+    with closing(sqlite3.connect(database.resolve().as_uri() + '?mode=ro', uri=True)) as connection:
+        decision_id, decision_json, snapshot_id, png, snapshot_json = connection.execute(
+            '''SELECT d.id, d.decision_json, c.snapshot_id, c.png, s.snapshot_json
+               FROM decisions d JOIN decision_captures c ON d.id = c.decision_id
+               JOIN decision_snapshots s ON s.id = c.snapshot_id ORDER BY d.rowid DESC LIMIT 1'''
+        ).fetchone()
+        table = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE name = 'paper_orders' AND type = 'table'"
+        ).fetchone()
+        count = connection.execute('SELECT COUNT(*) FROM paper_orders').fetchone()[0] if table else 0
+    assert count == 0
+    result, snapshot = json.loads(decision_json), json.loads(snapshot_json)
+    assert result['facts'] == snapshot['facts'] and result['snapshot_id'] == snapshot_id
+    assert result['facts']['market_data'] == 'constructed'
+    assert result['facts']['sma']['crossover'] == 'up'
+    assert result['facts']['decision_time'] == '2026-11-09T14:35:00.000000+00:00'
+    assert [candle['volume'] for candle in snapshot['candles']] == [None, 40, 60, 80, 100]
+    assert not result['eligible_for_paper_order']
+    with urlopen(frontend_url + f'/api/decisions/{decision_id}', timeout=5) as response:
+        assert json.load(response) == result
+    with urlopen(frontend_url + result['capture']['url'], timeout=5) as response:
+        assert response.headers.get_content_type() == 'image/png' and response.read() == png
+    digest = sha256(png).hexdigest()
+    assert result['capture']['sha256'] == digest
+    if not live:
+        assert result['analyst']['answers'] == {'action': 'buy', 'crossover': 'up', 'evidence': 'sufficient'}
+        assert result['reviewer']['answers'] == {'verdict': 'accept'}
+        for role in ('analyst', 'reviewer'):
+            assert result[role]['provider_decision_id'] == f'fixture-{role}-{digest}'
+        assert result['visual_comparison']['status'] == 'matches'
+    else:
+        for role in ('analyst', 'reviewer'):
+            print(f'{role}: {result[role]["status"]}, {result[role]["answers"]}', flush=True)
+        if not all(result[role]['call'] == 'returned' for role in ('analyst', 'reviewer')):
+            print(f'Live chart analysis pending. Status: {result["status"]}.', flush=True)
+            return False
+    print(f'Saved decision and PNG verified ({len(png)} bytes, SHA-256 {digest}). Order count: {count}.', flush=True)
+    return True
+
+
+def check_automation(database, frontend_url):
+    with closing(sqlite3.connect(database.resolve().as_uri() + '?mode=ro', uri=True)) as connection:
+        run_id, book, enabled, test_mode = connection.execute(
+            'SELECT id, book, enabled, test_mode FROM paper_automation_runs'
+        ).fetchone()
+        assert (enabled, test_mode) == (0, 1)
+        rows = connection.execute(
+            """SELECT j.id, j.status, j.decision_id, j.order_id, f.price, d.decision_json, c.png
+               FROM paper_automation_jobs j JOIN decisions d ON d.id = j.decision_id
+               JOIN decision_captures c ON c.decision_id = d.id
+               LEFT JOIN paper_fills f ON f.order_id = j.order_id WHERE run_id = ? ORDER BY candle""",
+            (run_id,),
+        ).fetchall()
+        assert connection.execute('SELECT COUNT(*) FROM paper_orders').fetchone() == (1,)
+        assert connection.execute('SELECT COUNT(*) FROM paper_fills').fetchone() == (1,)
+        assert connection.execute('SELECT cash, shares FROM paper_accounts WHERE id = ?', (book,)).fetchone() == ('993', 1)
+        assert connection.execute("SELECT cash, shares FROM paper_pnl WHERE event = 'Fill'").fetchall() == [('993', 1)]
+    assert len(rows) == 2
+    for row, status, action, verdict in zip(rows, ['filled', 'skipped'], ['buy', 'hold'],
+                                           ['accept', 'reject_unsupported_signal'], strict=True):
+        _, recorded, decision_id, order_id, price, data, png = row
+        decision = json.loads(data)
+        assert recorded == status and decision['id'] == decision_id and decision['proposal'] == action
+        assert decision['reviewer']['answers']['verdict'] == verdict
+        digest = sha256(png).hexdigest()
+        assert decision['analyst']['provider_decision_id'] == f'fixture-analyst-{digest}'
+        assert decision['reviewer']['provider_decision_id'] == f'fixture-reviewer-{digest}'
+        assert (order_id, price) == ((1, '7') if status == 'filled' else (None, None))
+    request = Request(f'{frontend_url}/api/paper/automation/{run_id}/jobs/{rows[0][0]}/analyze',
+                      data=b'{}', headers={'Content-Type': 'application/json'})
+    with urlopen(request, timeout=5) as response:
+        repeated = json.load(response)
+    assert repeated['decision_id'] == rows[0][2] and repeated['order_id'] == 1 and repeated['status'] == 'filled'
+    with closing(sqlite3.connect(database.resolve().as_uri() + '?mode=ro', uri=True)) as connection:
+        assert connection.execute('SELECT COUNT(*) FROM paper_fills').fetchone() == (1,)
+        assert connection.execute('SELECT cash, shares FROM paper_accounts WHERE id = ?', (book,)).fetchone() == ('993', 1)
+    print('Two chart decisions traced in SQLite. Approved buy filled once at $7, cash $993, 1 share. Veto and retry added no fill.', flush=True)
+
+
 def main():
     args = argparse.ArgumentParser(description=__doc__)
     args.add_argument('--no-open', action='store_true')
@@ -72,7 +153,11 @@ def main():
     mode.add_argument('--fixture', action='store_true', help='Exercise the live dashboard with labeled constructed input.')
     mode.add_argument('--replay', action='store_true', help='Verify two offline replays against a separate constructed store.')
     mode.add_argument('--prompt9', action='store_true', help='Verify indicators and paper execution with constructed replay data.')
+    mode.add_argument('--chart', action='store_true', help='Check chart capture and review with a controlled provider.')
+    mode.add_argument('--chart-live', action='store_true', help='Submit a constructed chart to the configured live provider.')
+    mode.add_argument('--automation', action='store_true', help='Check paper automation with disposable replay and fixed replies.')
     options = args.parse_args()
+    chart = options.chart or options.chart_live
     if options.browser_timeout <= 0:
         args.error('--browser-timeout must be positive.')
     if options.browser_result_file and options.browser_result_file.exists():
@@ -98,14 +183,24 @@ def main():
                 else:
                     backend_env['INVEST_LIVE_FEED'] = '0'
                     backend_args = ['uvicorn', 'backend.main:app', '--host', '127.0.0.1', '--port', str(backend_port)]
-                if options.replay or options.prompt9:
-                    module = 'scripts.check_prompt9' if options.prompt9 else 'scripts.check_replay'
+                if options.replay or options.prompt9 or chart or options.automation:
+                    module = ('scripts.check_automation' if options.automation else
+                              'scripts.check_prompt9' if options.prompt9 or chart else 'scripts.check_replay')
                     subprocess.run(
                         [sys.executable, '-m', module, '--seed', str(database)],
                         cwd=ROOT, check=True, timeout=30, **common,
                     )
                     backend_env['INVEST_SOURCE_LABEL'] = 'Constructed replay test data'
                     snapshot = database.read_bytes()
+                    if chart:
+                        backend_env['INVEST_PAPER_ORDER_SIZE'] = '1'
+                        backend_args = ['scripts.check_decisions', '--serve', str(backend_port), '--chart']
+                        if options.chart_live:
+                            backend_args.append('--live')
+                    elif options.automation:
+                        backend_env.update(INVEST_SOURCE_LABEL='Constructed automation fixture',
+                                           INVEST_PAPER_TEST_MODE='1', INVEST_PAPER_ORDER_SIZE='1')
+                        backend_args = ['scripts.check_automation', '--serve', str(backend_port)]
                 backend = subprocess.Popen([sys.executable, '-m', *backend_args], cwd=ROOT, env=backend_env, **common)
                 processes.append(backend)
                 wait_ready(backend_url + '/api/health', backend)
@@ -120,14 +215,23 @@ def main():
                 assert rows[1] == expected, f'Unexpected middle candle: {rows[1]}'
                 print('HTTP PASS: three candles; 14:31 UTC matches all six source fields.', flush=True)
                 browser_url = frontend_url
-                if options.replay or options.prompt9:
+                if options.replay or options.prompt9 or chart or options.automation:
                     browser_url += '/?source=replay'
                 elif not (options.live or options.fixture):
                     browser_url += '/?source=sample'
                 print(f'BROWSER URL: {browser_url}', flush=True)
                 if not options.no_open:
                     webbrowser.open(browser_url)
-                if options.prompt9:
+                if options.automation:
+                    print('Start replay. Step through source 14:34:05 UTC. Start paper automation, then step to '
+                          '14:35:05 (approved buy pending), 14:35:15 (fills at $7), and 14:36:05 '
+                          '(vetoed hold). Confirm cash $993, 1 share and both decision links, then Stop.', flush=True)
+                elif chart:
+                    print('Select SMA, start Replay and play through. In Candle start, select 14:34 UTC. '
+                          'Click Ask about chart. Confirm SMA, 1m, cutoff 14:35 UTC. In controlled mode expect '
+                          'buy/up/sufficient, a matching crossover, and reviewer accept. Open the saved PNG. '
+                          'The constructed fixture is ineligible for an order.', flush=True)
+                elif options.prompt9:
                     print(f'Constructed replay database: {database}', flush=True)
                     print('Replay SMA, then RANGE, then AAPL as described in README.md. Create the empty '
                           f'file "restart" in {temp} after checking P&L. The runner retries the first buy '
@@ -218,6 +322,10 @@ def main():
                             (710, 3, 10, -15, -5), (1025, 0, 25, 0, 25),
                         ], rows
                     print(f'SQLite confirmed 3 fills, 4 orders, 2 indicators, and P&L {rows}.', flush=True)
+                if chart and not check_chart_decision(database, frontend_url, options.chart_live):
+                    return 2
+                if options.automation:
+                    check_automation(database, frontend_url)
                 print('PASS: HTTP checks and browser observation completed.', flush=True)
                 return 0
             except (Exception, KeyboardInterrupt) as error:

@@ -32,3 +32,5 @@ The owner has not yet specified the bot's strategy, brokerage/execution scope, a
 - 2026-11-15: commit and push Prompt 8, retry any failed checks, then continue with Prompt 9.
 - 2026-11-15: continue through all prompts under 9, including 9A–9D.
 - 2026-11-15: commit and push Prompt 9, then continue with Prompt 10. The user expects the regular market session to be closed over the weekend.
+- Commit and push Prompt 10, then continue in order with Prompts 10A and 11.
+- Proceed to Prompt 12, the next prompt in the project sequence.

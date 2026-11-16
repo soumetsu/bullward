@@ -3,6 +3,7 @@
 from contextlib import closing
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from hashlib import sha256
 import json
 import os
 import sqlite3
@@ -14,7 +15,8 @@ from uuid import UUID, uuid4
 from pydantic import AwareDatetime, BaseModel, Field
 
 from .candles import load_observed_minutes
-from .indicators import IndicatorRequest, calculate_indicators
+from .chart_capture import MAX_DATA_URL, decode_capture
+from .indicators import IndicatorRequest, calculate_indicators, configurations
 from .live_feed import SYMBOL
 from .observations import SOURCE
 from .paper import DEFAULT_ORDER_SIZE, LIVE_BOOK, STARTING_CASH, _has_accounts, stamp, transaction
@@ -33,6 +35,26 @@ CHOICES = {
     "wait": "Stay flat in the paper account.",
     "close": "Exit the entire existing position.",
 }
+CROSSOVER_CHOICES = {
+    "up": "The short SMA visibly crosses above the long SMA at the selected candle.",
+    "down": "The short SMA visibly crosses below the long SMA at the selected candle.",
+    "none": "No crossover is visible at the selected candle.",
+    "unreadable": "The crossover cannot be read from the chart.",
+}
+EVIDENCE_CHOICES = {
+    "sufficient": "The chart visibly supports an assessment at the cutoff.",
+    "insufficient": "The chart lacks enough readable information at the cutoff.",
+}
+VERDICTS = {
+    "accept": "The proposal is supported by the frozen evidence and all paper rules.",
+    "reject_insufficient_cash": "The paper account cannot afford the proposed buy.",
+    "reject_unsupported_signal": "The signal, visual evidence, or position does not support the proposal.",
+}
+STRATEGY = (
+    "Buy requires an upward SMA crossover. Sell and close require a downward SMA crossover. "
+    "Hold keeps an open position, and wait requires a flat position. "
+    "Use the configured size for buy and sell and the whole position for close."
+)
 
 
 class ReplayContext(BaseModel):
@@ -46,6 +68,7 @@ class SnapshotRequest(BaseModel):
     symbol: Annotated[str, Field(min_length=1, max_length=64, pattern=r"^\S+$")] = SYMBOL
     interval: Interval = "1m"
     timestamp: AwareDatetime
+    range_start: AwareDatetime | None = None
     short: Window = 2
     long: Window = 3
     replay: ReplayContext | None = None
@@ -53,6 +76,7 @@ class SnapshotRequest(BaseModel):
 
 class DecisionRequest(BaseModel):
     snapshot_id: UUID | None = None
+    image_url: Annotated[str | None, Field(max_length=MAX_DATA_URL)] = None
 
 
 class ProviderFailure(Exception):
@@ -148,6 +172,8 @@ def create_snapshot(db_path, request, source):
         raise ValueError("The selected candle is still forming.")
     if request.short >= request.long:
         raise ValueError("The short SMA window must be smaller than the long window.")
+    if request.range_start and request.range_start > start:
+        raise ValueError("The chart range must include the selected candle. Reset the view and recapture.")
     symbol = request.symbol.upper()
     minutes, account, test_data = _read_evidence(db_path, request, cutoff, symbol)
     candles = [
@@ -156,12 +182,12 @@ def create_snapshot(db_path, request, source):
     ]
     indicator_result = calculate_indicators(IndicatorRequest(
         short=request.short, long=request.long, candles=[{**candle, "ended": True} for candle in candles],
-    ))
+    ), configurations(db_path))
     timestamp = start.strftime("%Y-%m-%dT%H:%M:%SZ")
     selected = next((candle for candle in candles if candle["timestamp"] == timestamp), None)
     indicator_values = [
         next((point["value"] for point in item["points"] if point["timestamp"] == timestamp), None)
-        for item in indicator_result["series"]
+        for item in indicator_result["series"][:2]
     ]
     crossover = next((item["direction"] for item in indicator_result["crossovers"] if
                       item["timestamp"] == timestamp), None)
@@ -180,6 +206,16 @@ def create_snapshot(db_path, request, source):
         "account": account, "order_size": _order_size(),
         "market_source": source, "market_data": "constructed" if test_data else "recorded",
     }
+    if request.range_start:
+        candles = [candle for candle in candles if datetime.fromisoformat(candle["timestamp"]) >= request.range_start]
+    chart_times = {candle["timestamp"] for candle in candles}
+    for item in indicator_result["series"]:
+        item["points"] = [point for point in item["points"] if point["timestamp"] in chart_times]
+    indicator_result["crossovers"] = [
+        item for item in indicator_result["crossovers"] if item["timestamp"] in chart_times
+    ]
+    if candles:
+        facts["chart_range"] = {"from": candles[0]["timestamp"], "to": candles[-1]["timestamp"]}
     snapshot = {
         "id": str(uuid4()), "facts": facts, "candles": candles, "indicators": indicator_result,
         "missing": missing, "replay": request.replay.model_dump(mode="json") if request.replay else None,
@@ -210,21 +246,37 @@ def get_decision(db_path, record_id):
     return _load(db_path, "decisions", "decision_json", record_id)
 
 
-def ask_openai(snapshot):
+def _question(name, instructions, choices):
+    return {"type": "choice", "name": name, "instructions": instructions,
+            "choices": [{"value": key, "description": meaning} for key, meaning in choices.items()]}
+
+
+def _analyst_questions(chart):
+    questions = [_question("action" if chart else QUESTION_NAME,
+                           f"Propose one action for this long-only paper account. {STRATEGY}", CHOICES)]
+    if chart:
+        questions.extend([
+            _question("crossover", "What crossover is visible at the selected candle? Use the image for this answer.",
+                      CROSSOVER_CHOICES),
+            _question("evidence", "Is the chart image sufficient to assess the signal at the cutoff?", EVIDENCE_CHOICES),
+        ])
+    return questions
+
+
+def ask_openai(snapshot, questions, image=None, context=None):
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key or not api_key.strip():
         raise ProviderFailure("provider_unconfigured", "Set OPENAI_API_KEY in the backend environment.")
-    facts = snapshot["facts"]
+    evidence = {"snapshot_id": snapshot["id"], **snapshot["facts"]}
+    if context:
+        evidence["review"] = context
+    parts = [{"type": "input_json", "data": evidence}]
+    if image:
+        parts.append({"type": "input_image", "image_url": image})
     payload = {
         "model": MODEL,
-        "input": [{"role": "user", "content": [{"type": "input_json", "data": {
-            "snapshot_id": snapshot["id"], **facts,
-        }}]}],
-        "questions": [{
-            "type": "choice", "name": QUESTION_NAME,
-            "instructions": "Select one proposed action for this long-only paper trading simulation using the provided facts.",
-            "choices": [{"value": key, "description": meaning} for key, meaning in CHOICES.items()],
-        }],
+        "input": [{"role": "user", "content": parts}],
+        "questions": questions,
     }
     request = Request("https://api.openai.com/v1/decisions", data=json.dumps(payload).encode(),
                       headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"})
@@ -243,17 +295,38 @@ def ask_openai(snapshot):
         raise ProviderFailure("malformed_answer", "OpenAI returned an unreadable response.") from None
 
 
-def _proposal(response):
-    if isinstance(response, dict) and isinstance(response.get("answers"), list):
-        answers = [answer for answer in response["answers"] if
-                   isinstance(answer, dict) and answer.get("name") == QUESTION_NAME]
-        if len(answers) == 1 and answers[0].get("type") == "refusal":
-            raise ProviderFailure("provider_refusal", "The provider declined to answer the named question.")
-        if len(answers) == 1 and answers[0].get("type") == "choice":
-            choice = answers[0].get("choice")
-            if isinstance(choice, str) and choice in CHOICES:
-                return choice
-    raise ProviderFailure("malformed_answer", "The provider did not return one allowed named choice.")
+def _call_role(role, ask, snapshot, image, context=None):
+    role["call"] = "attempted"
+    try:
+        response = ask(snapshot, role["questions"], image, context)
+        role["call"] = "returned"
+        rows = response.get("answers") if isinstance(response, dict) else None
+        if not isinstance(rows, list):
+            raise ProviderFailure("malformed_answer", "The provider did not return an answer list.")
+        if isinstance(response.get("id"), str):
+            role["provider_decision_id"] = response["id"]
+        errors = []
+        refused = []
+        for question in role["questions"]:
+            name = question["name"]
+            matches = [row for row in rows if isinstance(row, dict) and row.get("name") == name]
+            answer = matches[0] if len(matches) == 1 else {}
+            choice = answer.get("choice")
+            if answer.get("type") == "refusal":
+                refused.append(name)
+            elif answer.get("type") == "choice" and choice in [item["value"] for item in question["choices"]]:
+                role["answers"][name] = choice
+            else:
+                errors.append(name)
+        if refused:
+            raise ProviderFailure("provider_refusal", "The provider declined: " + ", ".join(refused) + ".")
+        if errors:
+            raise ProviderFailure("malformed_answer", "Missing or invalid answers: " + ", ".join(errors) + ".")
+        role["status"] = "valid"
+    except ProviderFailure as error:
+        if error.status == "provider_unconfigured":
+            role["call"] = "not_sent"
+        role.update(status=error.status, explanation=str(error))
 
 
 def _validate(action, facts):
@@ -267,45 +340,104 @@ def _validate(action, facts):
         return None, "This action requires an open position."
     if action == "wait" and shares != 0:
         return None, "Wait requires a flat position."
+    expected = {"buy": "up", "sell": "down", "close": "down"}.get(action)
+    if expected and facts["sma"]["crossover"] != expected:
+        return None, f"{action.capitalize()} requires a confirmed {expected} SMA crossover."
     return {"buy": size, "sell": size, "close": shares}.get(action), None
 
 
-def request_decision(db_path, snapshot_id, ask=ask_openai, *, provider="OpenAI", model=MODEL):
+def _role(provider, model, questions):
+    return {"provider": provider, "model": model, "call": "not_sent", "status": "not_run",
+            "questions": questions, "answers": {}, "provider_decision_id": None, "explanation": None}
+
+
+def _review_result(result, snapshot, image_url, ask):
+    facts = snapshot["facts"]
+    sma = facts["sma"]
+    evidence = (f"{facts['symbol']} {facts['interval']} closed at {facts['close']} with "
+                f"short/long SMA {sma['short']}/{sma['long']} and {sma['crossover'] or 'no'} crossover. "
+                f"Paper cash was {facts['account']['cash']} with {facts['account']['shares']} shares.")
+    analyst, reviewer = result["analyst"], result["reviewer"]
+    _call_role(analyst, ask, snapshot, image_url)
+    result.update(model_call=analyst["call"], provider_decision_id=analyst["provider_decision_id"])
+    if analyst["status"] != "valid":
+        result.update(status=analyst["status"], explanation=f"{evidence} {analyst['explanation']}")
+        return
+    action = analyst["answers"]["action" if image_url else QUESTION_NAME]
+    result["proposal"] = action
+    quantity, reason = _validate(action, facts)
+    if action == "buy":
+        cost = facts["order_size"] * Decimal(str(facts["close"]))
+        evidence += f" The proposed {facts['order_size']} share(s) cost {cost} at the snapshot close."
+    visual_status = None
+    if image_url:
+        claim = analyst["answers"]["crossover"]
+        actual = sma["crossover"] or "none"
+        if claim == "unreadable" or analyst["answers"]["evidence"] == "insufficient":
+            visual_status = "insufficient_visual_evidence"
+        elif claim != actual:
+            visual_status = "conflicting_signal"
+        result["visual_comparison"] = {"model": claim, "calculated": actual, "status": visual_status or "matches"}
+        evidence += f" The analyst reported {claim}; Python calculated {actual}."
+    analyst["explanation"] = evidence
+    _call_role(reviewer, ask, snapshot, image_url, {
+        "proposal": action, "analyst_answers": analyst["answers"], "recorded_evidence": evidence,
+        "backend_rule_result": reason or visual_status or "passed",
+    })
+    verdict = reviewer["answers"].get("verdict")
+    status = "valid"
+    detail = ""
+    if reviewer["status"] != "valid":
+        status, detail = f"review_{reviewer['status']}", reviewer["explanation"]
+    else:
+        reviewer["explanation"] = evidence + f" Reviewer verdict: {verdict}."
+        if reason:
+            status, detail = "invalid_proposal", reason
+        elif visual_status:
+            status, detail = visual_status, "Recapture the chart with a readable view through the selected candle."
+        elif verdict != "accept":
+            status, detail = "review_rejected", f"Reviewer verdict: {verdict}."
+    result.update(
+        status=status, quantity=quantity, explanation=f"{evidence} {detail}".strip(),
+        eligible_for_paper_order=(status == "valid" and quantity is not None and
+                                  facts["market_data"] == "recorded" and facts["account"]["book"] is not None),
+    )
+
+
+def request_decision(db_path, snapshot_id, ask=ask_openai, *, provider="OpenAI", model=MODEL, image_url=None):
     snapshot = get_snapshot(db_path, snapshot_id)
     result = {
         "id": str(uuid4()), "snapshot_id": snapshot_id, "facts": snapshot["facts"] if snapshot else None,
         "provider": provider, "model": model, "provider_decision_id": None, "model_call": "not_sent",
         "proposal": None, "quantity": None, "eligible_for_paper_order": False,
+        "analyst": _role(provider, model, _analyst_questions(image_url is not None)),
+        "reviewer": _role(provider, model, [_question(
+            "verdict", f"Independently review the analyst proposal using the frozen evidence. {STRATEGY} "
+            "Reject an unaffordable buy, unsupported or unreadable signals, and position-rule violations.", VERDICTS,
+        )]),
+        "capture": None, "visual_comparison": None,
     }
-    if not snapshot or snapshot["missing"]:
-        result["status"] = "missing_input"
-        result["explanation"] = ("Missing evidence: " + ", ".join(snapshot["missing"]) + "."
-                                 if snapshot else "An existing snapshot ID is required.")
-    else:
-        facts = snapshot["facts"]
-        sma = facts["sma"]
-        evidence = (f"{facts['symbol']} {facts['interval']} closed at {facts['close']} with "
-                    f"short/long SMA {sma['short']}/{sma['long']} and {sma['crossover'] or 'no'} crossover. "
-                    f"Paper cash was {facts['account']['cash']} with {facts['account']['shares']} shares.")
-        result["model_call"] = "attempted"
+    png = None
+    if image_url is not None:
         try:
-            response = ask(snapshot)
-            result["model_call"] = "returned"
-            action = _proposal(response)
-            quantity, reason = _validate(action, facts)
-            result.update(
-                proposal=action, quantity=quantity, status="invalid_proposal" if reason else "valid",
-                explanation=evidence + (f" {reason}" if reason else ""),
-                eligible_for_paper_order=(reason is None and quantity is not None and
-                                          facts["market_data"] == "recorded" and
-                                          facts["account"]["book"] is not None),
-            )
-            if isinstance(response.get("id"), str):
-                result["provider_decision_id"] = response["id"]
+            decoded, tag = decode_capture(image_url)
+            if not snapshot or tag != snapshot_id:
+                raise ProviderFailure("capture_mismatch", "The PNG belongs to a different snapshot. Recapture the chart.")
+            png = decoded
+            result["capture"] = {"url": f"/api/decisions/{result['id']}/capture",
+                                 "snapshot_id": snapshot_id, "sha256": sha256(png).hexdigest()}
+        except ValueError as error:
+            result.update(status="invalid_capture", explanation=str(error))
         except ProviderFailure as error:
-            if error.status == "provider_unconfigured":
-                result["model_call"] = "not_sent"
-            result.update(status=error.status, explanation=f"{evidence} {error}")
+            result.update(status=error.status, explanation=str(error))
+    if "status" not in result:
+        if not snapshot or snapshot["missing"]:
+            result.update(status="missing_input", explanation=(
+                "Missing evidence: " + ", ".join(snapshot["missing"]) + "."
+                if snapshot else "An existing snapshot ID is required."
+            ))
+        else:
+            _review_result(result, snapshot, image_url, ask)
     with transaction(db_path) as connection:
         connection.execute("""
             CREATE TABLE IF NOT EXISTS decisions (
@@ -313,4 +445,24 @@ def request_decision(db_path, snapshot_id, ask=ask_openai, *, provider="OpenAI",
             )
         """)
         connection.execute("INSERT INTO decisions VALUES (?, ?)", (result["id"], json.dumps(result)))
+        if png is not None:
+            connection.execute("""
+                CREATE TABLE IF NOT EXISTS decision_captures (
+                    decision_id TEXT PRIMARY KEY REFERENCES decisions(id),
+                    snapshot_id TEXT NOT NULL REFERENCES decision_snapshots(id), png BLOB NOT NULL
+                )
+            """)
+            connection.execute("INSERT INTO decision_captures VALUES (?, ?, ?)", (result["id"], snapshot_id, png))
     return result
+
+
+def get_capture(db_path, decision_id):
+    with closing(sqlite3.connect(db_path.resolve().as_uri() + "?mode=ro", uri=True)) as connection:
+        exists = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE name = 'decision_captures' AND type = 'table'"
+        ).fetchone()
+        if exists:
+            row = connection.execute("SELECT png FROM decision_captures WHERE decision_id = ?", (decision_id,)).fetchone()
+            if row:
+                return row[0]
+    return None

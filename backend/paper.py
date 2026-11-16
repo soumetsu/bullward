@@ -12,6 +12,7 @@ from .timeframes import aggregate_candles
 STARTING_CASH = "1000"
 LIVE_BOOK = "live"
 DEFAULT_ORDER_SIZE = 1
+MAX_DECISION_AGE = timedelta(minutes=5)
 
 SCHEMA = """
 BEGIN IMMEDIATE;
@@ -82,60 +83,69 @@ def _observation(connection, row_id, symbol):
 
 
 def execute_action(db_path, book, symbol, action, request_id, quantity=None, cursor=None):
-    """Submit an intent for the next observed price. Also used by future decision callers."""
+    """Submit a manual intent for the next observed price."""
     if action in ("hold", "wait"):
         return None
     if action not in ("buy", "sell", "close"):
         raise ValueError("Unknown paper action.")
     initialize_paper(db_path)
-    requested = repr(quantity)
     with transaction(db_path) as connection:
-        prior = connection.execute(
-            "SELECT * FROM paper_orders WHERE account_id = ? AND request_id = ?", (book, request_id)
-        ).fetchone()
-        if prior:
-            if (symbol, action, requested) != (prior["symbol"], prior["action"], prior["requested_quantity"]):
-                raise ValueError("That request ID belongs to a different order.")
-            return dict(prior)
+        return submit_order(connection, book, symbol, action, request_id, quantity, cursor)
 
-        if book == LIVE_BOOK:
-            submitted = stamp(datetime.now(UTC))
-            fence, = connection.execute("SELECT COALESCE(MAX(id), 0) FROM observations").fetchone()
-        else:
-            observation = _observation(connection, cursor, symbol)
-            if observation is None:
-                raise ValueError("Start replay before placing a paper order.")
-            submitted, fence = observation["received_at_utc"], observation["id"]
 
-        connection.execute(
-            "INSERT OR IGNORE INTO paper_accounts (id, symbol, cash, cursor_id) VALUES (?, ?, ?, ?)",
-            (book, symbol, STARTING_CASH, cursor),
-        )
-        account = _account(connection, book)
-        if symbol != account["symbol"] or (book != LIVE_BOOK and cursor != account["cursor_id"]):
-            raise ValueError("The order must use the current paper account and replay observation.")
+def ensure_account(connection, book, symbol, cursor):
+    connection.execute(
+        "INSERT OR IGNORE INTO paper_accounts (id, symbol, cash, cursor_id) VALUES (?, ?, ?, ?)",
+        (book, symbol, STARTING_CASH, cursor),
+    )
+    account = _account(connection, book)
+    if symbol != account["symbol"] or (book != LIVE_BOOK and cursor != account["cursor_id"]):
+        raise ValueError("The order must use the current paper account and replay observation.")
+    return account
 
-        if action == "close":
-            quantity = account["shares"]
-        side = "buy" if action == "buy" else "sell"
-        reason = None
-        if action == "close" and not quantity:
-            reason = "There is no position to close."
-        elif type(quantity) is not int or not 1 <= quantity <= 2**53 - 1:
-            reason = "Enter a positive whole number of shares."
-            quantity = None
-        elif side == "sell" and quantity > account["shares"]:
-            reason = "The account has fewer shares than requested."
 
-        order = connection.execute(
-            """INSERT INTO paper_orders
-               (account_id, request_id, symbol, action, side, requested_quantity, quantity,
-                submitted_at, after_id, status, reason)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *""",
-            (book, request_id, symbol, action, side, requested, quantity,
-             submitted, fence, "rejected" if reason else "pending", reason),
-        ).fetchone()
-        return dict(order)
+def submit_order(connection, book, symbol, action, request_id, quantity, cursor):
+    """Record an order in the caller's SQLite transaction."""
+    requested = repr(quantity)
+    prior = connection.execute(
+        "SELECT * FROM paper_orders WHERE account_id = ? AND request_id = ?", (book, request_id)
+    ).fetchone()
+    if prior:
+        if (symbol, action, requested) != (prior["symbol"], prior["action"], prior["requested_quantity"]):
+            raise ValueError("That request ID belongs to a different order.")
+        return dict(prior)
+
+    if book == LIVE_BOOK:
+        submitted = stamp(datetime.now(UTC))
+        fence, = connection.execute("SELECT COALESCE(MAX(id), 0) FROM observations").fetchone()
+    else:
+        observation = _observation(connection, cursor, symbol)
+        if observation is None:
+            raise ValueError("Start replay before placing a paper order.")
+        submitted, fence = observation["received_at_utc"], observation["id"]
+
+    account = ensure_account(connection, book, symbol, cursor)
+    if action == "close":
+        quantity = account["shares"]
+    side = "buy" if action == "buy" else "sell"
+    reason = None
+    if action == "close" and not quantity:
+        reason = "There is no position to close."
+    elif type(quantity) is not int or not 1 <= quantity <= 2**53 - 1:
+        reason = "Enter a positive whole number of shares."
+        quantity = None
+    elif side == "sell" and quantity > account["shares"]:
+        reason = "The account has fewer shares than requested."
+
+    order = connection.execute(
+        """INSERT INTO paper_orders
+           (account_id, request_id, symbol, action, side, requested_quantity, quantity,
+            submitted_at, after_id, status, reason)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING *""",
+        (book, request_id, symbol, action, side, requested, quantity,
+         submitted, fence, "rejected" if reason else "pending", reason),
+    ).fetchone()
+    return dict(order)
 
 
 def _price(value):
@@ -174,7 +184,40 @@ def _mark_candles(connection, account, candles):
                      ended_at, ended_at, price)
 
 
+def has_automation(connection):
+    return connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'paper_automation_jobs'"
+    ).fetchone() is not None
+
+
+def _linked_job(connection, order_id):
+    if has_automation(connection):
+        return connection.execute(
+            """SELECT j.*, r.enabled FROM paper_automation_jobs j
+               JOIN paper_automation_runs r ON r.id = j.run_id WHERE j.order_id = ?""", (order_id,),
+        ).fetchone()
+    return None
+
+
 def _fill(connection, account, order, observation, price):
+    job = _linked_job(connection, order["id"])
+    if job:
+        if job["status"] != "pending":
+            return
+        cutoff = datetime.fromisoformat(job["cutoff"])
+        market_time = datetime.fromtimestamp(observation["source_time_ms"] / 1000, UTC)
+        clock = (datetime.now(UTC) if account["id"] == LIVE_BOOK
+                 else datetime.fromisoformat(observation["received_at_utc"]))
+        reason = None
+        if not job["enabled"]:
+            reason = "Paper automation stopped before the fill."
+        elif clock - cutoff > MAX_DECISION_AGE:
+            reason = "The decision expired before the fill."
+        elif market_time < cutoff:
+            reason = "The next receipt carried a market price from before the decision cutoff."
+        if reason:
+            _reject_fill(connection, order["id"], job, reason)
+            return
     quantity = order["quantity"]
     cash = Decimal(account["cash"])
     basis = Decimal(account["cost_basis"])
@@ -200,7 +243,7 @@ def _fill(connection, account, order, observation, price):
 
     order_id = order["id"]
     if reason:
-        connection.execute("UPDATE paper_orders SET status = 'rejected', reason = ? WHERE id = ?", (reason, order_id))
+        _reject_fill(connection, order_id, job, reason)
         return
     executed_at = observation["received_at_utc"] if account["id"] != LIVE_BOOK else stamp(datetime.now(UTC))
     connection.execute(
@@ -214,6 +257,16 @@ def _fill(connection, account, order, observation, price):
     price_time = stamp(datetime.fromtimestamp(observation["source_time_ms"] / 1000, UTC))
     _pnl(connection, _account(connection, account["id"]), "Fill", order_id,
          observation["received_at_utc"], price_time, price)
+    if job:
+        connection.execute("UPDATE paper_automation_jobs SET status = 'filled' WHERE id = ?", (job["id"],))
+
+
+def _reject_fill(connection, order_id, job, reason):
+    connection.execute("UPDATE paper_orders SET status = 'rejected', reason = ? WHERE id = ?", (reason, order_id))
+    if job:
+        connection.execute(
+            "UPDATE paper_automation_jobs SET status = 'skipped', reason = ? WHERE id = ?", (reason, job["id"]),
+        )
 
 
 def advance_replay_account(db_path, book, symbol, previous_id, observation_id, candles):
