@@ -43,7 +43,7 @@ def devtools_endpoint(profile, process):
     raise RuntimeError("Timed out waiting for the browser DevTools endpoint.")
 
 
-def run_browser(node, url, directory, log):
+def run_browser(node, url, directory, log, driver=None):
     profile = directory / "browser"
     executable = find_browser()
     edge_arguments = ["--edge-skip-compat-layer-relaunch"] if Path(executable).name.lower() == "msedge.exe" else []
@@ -58,7 +58,7 @@ def run_browser(node, url, directory, log):
     )
     try:
         endpoint = devtools_endpoint(profile, process)
-        driver = Path(__file__).with_name("workstation_browser.mjs")
+        driver = driver or Path(__file__).with_name("workstation_browser.mjs")
         result = subprocess.run([node, str(driver), endpoint, url], timeout=180)
         if result.returncode:
             raise RuntimeError(f"Browser checks exited with status {result.returncode}.")

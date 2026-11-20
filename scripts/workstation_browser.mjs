@@ -86,6 +86,7 @@ async function step(time) {
 }
 
 async function selectCandle(time) {
+  if (!await evaluate(() => !!document.querySelector('#candle-data'))) await button('Show more candles')
   await wait('selectable candle ' + time, (value) => {
     const button = [...document.querySelectorAll('.time-button')]
       .find((item) => item.innerText.endsWith(value))
@@ -126,6 +127,28 @@ async function job(time, action, status, detail = '') {
   }, time, action, status, detail)
 }
 
+async function checkDisclosureControls() {
+  assert.deepEqual(await evaluate(() => [!!document.querySelector('#crossover-list'), !!document.querySelector('#candle-data')]), [false, false], 'Lists must be absent from DOM by default')
+  await wait('available crossovers', () => document.querySelector('[aria-controls="crossover-list"]')?.innerText.match(/\([1-9]/))
+  await evaluate(() => document.querySelector('[aria-controls="crossover-list"]').click())
+  await wait('rendered crossover list', () => document.querySelectorAll('#crossover-list button').length > 0)
+  await evaluate(() => document.querySelector('[aria-controls="crossover-list"]').click())
+  assert.equal(await evaluate(() => document.querySelector('#crossover-list')), null)
+  await button('Show more candles')
+  await wait('rendered candle rows', () => document.querySelectorAll('#candle-data tbody tr').length > 0)
+  await button('Show fewer candles')
+  assert.equal(await evaluate(() => document.querySelector('#candle-data')), null)
+  const pixels = () => [...document.querySelectorAll('.chart-panel canvas')].map(canvas => canvas.toDataURL()).join('')
+  const before = await evaluate(pixels)
+  await button('Show SMA markers')
+  await wait('visible marker toggle active', () => document.querySelector('.marker-toggle')?.getAttribute('aria-pressed') === 'true')
+  await delay(300)
+  assert.notEqual(await evaluate(pixels), before, 'Showing SMA markers must change rendered chart pixels')
+  await button('Hide SMA markers')
+  await wait('marker toggle inactive', () => document.querySelector('.marker-toggle')?.getAttribute('aria-pressed') === 'false')
+  console.log('Browser PASS: crossover and candle lists absent until expanded and removed when collapsed; prominent marker toggle changes chart pixels.')
+}
+
 async function checkChart() {
   await selectCandle('14:34')
   await field('input[maxlength="64"]', 'Smoke SMA')
@@ -140,38 +163,16 @@ async function checkChart() {
 
   await counts(0, 0)
   await button('Ask about chart')
-  await text('.chart-decision figcaption', 'SMOKE · 1m · cutoff 2026-11-09 14:35:00 UTC')
-  await text('.chart-decision', 'Final check · valid')
-  const [answers, pixels] = await evaluate(async () => {
-    const image = document.querySelector('.chart-decision img')
-    await image.decode()
-    const canvas = document.createElement('canvas')
-    canvas.width = image.naturalWidth
-    canvas.height = image.naturalHeight
-    const context = canvas.getContext('2d')
-    context.drawImage(image, 0, 0)
-    const { data } = context.getImageData(0, 0, canvas.width, canvas.height)
-    return [
-      [...document.querySelectorAll('.decision-roles dd')].map((item) => item.innerText),
-      [canvas.width, canvas.height, data.some((value, index) => value !== data[index % 4])],
-    ]
-  })
-  assert.deepEqual(answers, ['buy', 'up', 'sufficient', 'accept'])
-  assert.deepEqual(pixels, [960, 440, true])
-  const success = await counts(0, 0)
-  assert.deepEqual(success.calls.map(({ candle, role }) => [candle, role]), [
-    ['14:34', 'analyst'], ['14:34', 'reviewer'],
-  ])
-
-  await selectCandle('14:33')
+  await text('.chart-decision figcaption', 'signal for 2026-11-09T14:35:00Z')
+  await text('.exercise-result', 'Model choice: wait')
+  await text('.exercise-result', 'completed')
+  await counts(0, 0)
   await button('Ask about chart')
-  await text('.chart-decision', 'Final check · provider_error')
-  await text('.chart-decision', 'OpenAI returned HTTP 503.')
-  const failed = await counts(0, 0)
-  assert.deepEqual(failed.calls.map(({ candle, role }) => [candle, role]), [
-    ['14:34', 'analyst'], ['14:34', 'reviewer'], ['14:33', 'analyst'],
-  ])
-  console.log('Browser PASS: decoded chart, buy/up/sufficient and accept, visible provider HTTP 503, zero fills.')
+  await text('.exercise-result', 'provider_error')
+  await text('.exercise-result', 'OpenAI returned HTTP 503.')
+  await counts(0, 0)
+  console.log('Browser PASS: image-only exercise wait on flat bodies, visible HTTP 503, zero fills.')
+
 }
 
 async function checkAutomation() {
@@ -232,6 +233,7 @@ async function checkAutomation() {
   await text('.replay-controls', 'Replay complete')
   await selectCandle('14:42')
   await text('.inspector-note', 'Interval ended')
+  await evaluate(() => document.querySelector('[aria-controls="crossover-list"]').click())
   await text('.indicator-legend', 'SMA crossed up · Nov 9, 2026 14:42 UTC')
   assert.deepEqual(await counts(3, 3), stopped, 'A completed candle after Stop changed paper or model state')
   console.log('Browser PASS: 4 at $100, 1 at $110, 3 at $105; $1,025 cash, 0 shares, $25 realized, $0 unrealized; duplicate, veto and Stop added no fill.')
@@ -251,6 +253,7 @@ try {
   await button('Start replay')
   await text('.replay-progress dd', 'T14:30:05')
   for (const time of ['14:31:05', '14:32:05', '14:33:05', '14:34:05', '14:35:05']) await step(time)
+  await checkDisclosureControls()
   await checkChart()
   await checkAutomation()
 } catch (error) {

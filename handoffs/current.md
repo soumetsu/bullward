@@ -4,7 +4,15 @@ Updated: 2026-11-16
 
 ## Current handoff
 
-The repository is on `main`. Prompt 13 was pushed to `origin/main` as `073aace`. Prompt 14 is in the working tree for review. The numbered sections below preserve each session's record.
+At the start of the API audit, `main` matched the local `origin/main` ref at `004bc23` (Prompt 14) and the working tree was clean. The numbered sections below preserve each session's record.
+
+## API audit — 2026-11-16
+
+Reviewed the Yahoo Finance feed, OpenAI Decisions and GPT-Live calls, chart rendering, GitHub smoke workflow, and the proposed Webull integration. The audit changes project records only. The repository ignores the root `.env`, and the FastAPI application reads credentials from its process environment. Webull access and intended use remain to be decided. A read-only sandbox historical-bars check is the proposed first step if the student chooses to proceed. See `docs/verification.md` for observed checks.
+
+## Service restart — 2026-11-17
+
+Restarted FastAPI on port 8001 and Vite on port 5175 using the documented development entry points. Dashboard HTML, direct backend health, and proxied backend health returned HTTP 200. Services were left running. Logs are under the Windows temporary directory in `invest-dev-services`. Recheck availability on resume. Next task awaits user direction.
 
 ## Project and root
 
@@ -147,3 +155,47 @@ FastAPI on port 8001 and the dashboard on port 5175 are running with Prompt 13. 
 Both final runs exited 0 with fresh databases and browser profiles. The browser and SQLite agreed on $1,025 cash, zero shares, $25 realized, and $0 unrealized. Both runs verified the saved SMA edit, the visible controlled provider failure, and three fills after exact duplicate intake, a reviewer veto, and a subsequent completed candle after Stop. AutoLoop corrected an Edge startup failure and a time-label mismatch. See `docs/verification.md` for the results and remaining live observations.
 
 The running development dashboard on port 5175 and FastAPI on port 8001 include the indicator window editor. Prompt 14 awaits review. The next step is to commit and push the reviewed changes when requested, then check the workflow result for that commit. Prompt 14 is the last numbered prompt currently saved.
+
+## Repository report — 2026-11-17
+
+Created root report.md containing only the GitHub repository and latest commit links, as requested. Remote HEAD/main and local HEAD matched 004bc2361e7d130488eedb7009cd757cb314cded. Updated the chat decision record and verification log, preserving existing uncommitted audit/restart work. No commit made. Next task: await user direction; recheck remote HEAD if refreshing the report.
+
+## Service availability — 2026-11-19
+
+Both development services were already running and were reused. Frontend http://127.0.0.1:5175/, backend health on port 8001, and frontend-proxied health returned HTTP 200; health bodies reported ok. Updated verification and handoff only; preserved existing work. No pending startup action. On resume recheck availability; next task awaits user direction.
+
+## Prompt 15 and chart-first layout — 2026-11-19
+
+Implemented the manual image-only long/short/wait exercise requested in prompts/prompts/15-image-only-chart-exercise.md, plus the browser follow-up to move the chart to the top. Chart/inspector now precede automation, indicators and feed cards. See docs/chart-exercise.md for the educational flowchart, precise clock/missing-minute rules, UI usage and isolated SmokeTest command.
+
+New files: backend/chart_exercise.py; frontend/src/components/ExerciseDecision.vue; scripts/exercise_smoke.py and exercise_browser.mjs; the saved Prompt 15; docs/chart-exercise.md and three reviewed capture images. Updated backend routes, App.vue, CandleChart labels, replay clock context, workstation test fixture/driver and optional driver support in workstation_runner.py. Updated README, design, preferences and verification. Preserved earlier audit/restart/report work. report.md unchanged. No dependency changes or commit.
+
+Verified: `python -m scripts.exercise_smoke` on host passes green/long, red/short, mixed/wait, flat/wait, missing-minute local wait, visible HTTP 503, malformed replies, unavailable probability and expired-live-minute guards. Real browser captures and timestamp-only model boundary verified; no paper orders/fills. Final run confirms chart before indicators. `python -m scripts.smoke_test --workstation` passes the image exercise plus existing automation ($1,025 cash, 0 shares, $25 realized, 3 fills); Vite build, both adapter tests, backend import/routes and diff formatting passed. Failures/corrections are recorded in docs/verification.md.
+
+Development backend was reloaded on 8001; frontend remains on 5175. Health/proxied health ok, frontend HTTP 200, direct OpenAPI exposes new routes. Services left running. Before relying on this state, recheck HTTP availability and rerun `python -m scripts.exercise_smoke`. Live OpenAI verification remains pending a backend process environment key; none was available in the launch environment. .env is not loaded automatically. Next: student review of these uncommitted changes, then configure/run a live chart exercise if requested. Do not commit without review.
+
+## Panel pop-outs — 2026-11-19
+
+Added chart, inspector and quote/feed pop-out buttons opening dedicated resizable windows. Live windows connect independently; saved-chart windows copy the currently displayed replay snapshot and remain frozen. Future option chains are not implemented. Preserved existing work. Vite production build and diff formatting passed for the initial implementation; final replay-state adjustment requires browser verification. No dependencies changed and no commit made. Next: verify actual window opening, layout and live updates in browser; rerun build after the replay adjustment.
+
+## Prompt 17 — lazy chart details (2026-11-19)
+
+Added collapsed-by-default crossover history and candle data, with lazy v-if rendering/removal and bounded expanded scroll areas. Added a prominent SMA marker visibility toggle below the chart, default off for the main workstation, independent of the list and SMA lines. Capture labels/defaults are preserved. Files: frontend/src/App.vue, components/CandleChart.vue, scripts/workstation_browser.mjs; saved prompts/17-lazy-chart-details.md; updated preference/chat record, README, design and verification. Preserved prior uncommitted work. No dependency changes or commit.
+
+Verification: Vite build passed (33 modules), both chart-data tests passed, full `python -m scripts.smoke_test --workstation` passed with real browser assertions for DOM absence/expansion/removal and chart pixel changes from marker visibility. Existing SMA, image exercise and paper automation/SQLite checks also passed. Test browser/services were cleaned up. No failed checks/correction cycles. See docs/verification.md for commands/results.
+
+Observe via refresh at http://127.0.0.1:5175/: Show more crossovers/candles expands; Show fewer collapses/removes entries; Show/Hide SMA markers controls chart arrows/text separately. No backend restart needed. Next: student review; on resume verify service availability and rerun the workstation SmokeTest before relying on these checks. Live OpenAI key configuration and prior pop-out-window browser verification remain pending separately. Do not commit without student review.
+
+## Prompt 15 follow-up — 2026-11-19
+
+The workstation at http://127.0.0.1:5175/ serves the chart exercise with fixed live snapshot bounds, the exact preceding minute candles, gray flat bodies and a capture without the horizontal price guide. Use **1 minute** and **Ask about chart** on the live chart or Replay. Changes are in `backend/chart_exercise.py`, the candle chart and exercise Vue components, both browser smoke paths and their documentation. Preserved earlier work. No dependency edits or commit.
+
+`python -m scripts.exercise_smoke` passed in Edge after one correction cycle. Browser pixels and UI showed green/long, red/short and mixed/wait, with controlled replies. The command also checked the live snapshot path, gap, flat candle, provider errors, and zero orders/fills. `python -m scripts.smoke_test --workstation`, Vite build and both chart adapter tests passed. FastAPI was reloaded with both routes and health verified. See `docs/verification.md` for the observed failures and resolutions.
+
+Pending live model verification. `python -m scripts.exercise_smoke --live` preflight exited 2 because the launch environment lacked `OPENAI_API_KEY`. After a key is available in the process environment, rerun it against the three synthetic charts and record the choices. Rerun the local smoke and health checks when resuming. Student review is required before committing.
+
+## Ask about chart navigation follow-up — 2026-11-19
+
+In the Project 4 Invest workstation, **Ask about chart** now scrolls and focuses the Decision API heading immediately. Progress, errors and results appear under the heading. The inspector pop-out reveals the same panel on request. Updated `frontend/src/App.vue`, `frontend/src/components/ExerciseDecision.vue`, `scripts/exercise_browser.mjs`, the saved Prompt 15, preferences, and exercise/verification documentation. No dependencies changed.
+
+`python -m scripts.exercise_smoke` passed on rerun in Edge, including the new viewport and focus checks on the workstation and inspector pop-out. The first run exposed a hidden chart mounting error in the inspector pop-out. See `docs/verification.md` for the correction and results. The Vite build and `git diff --check` passed. Refresh the running dashboard to observe the frontend update. Live model verification still needs `OPENAI_API_KEY`. Next is student review. On resume rerun the exercise SmokeTest and check service availability. No commit was made.

@@ -7,6 +7,10 @@ const props = defineProps({
   rows: { type: Array, required: true },
   selected: { type: String, default: '' },
   indicators: { type: Object, required: true },
+  labels: { type: Array, default: () => [] },
+  showSmaMarkers: { type: Boolean, default: true },
+  flatColor: { type: String, default: '' },
+  showPriceLine: { type: Boolean, default: true },
 })
 const emit = defineEmits(['select', 'hover'])
 const host = ref(null)
@@ -43,17 +47,24 @@ function showIndicators() {
       lines.delete(id)
     }
   }
-  markers.setMarkers(props.indicators.crossovers.map(({ timestamp, direction }) => ({
+  markers.setMarkers([...(props.showSmaMarkers ? props.indicators.crossovers : []).map(({ timestamp, direction }) => ({
     time: Date.parse(timestamp) / 1000,
     position: direction === 'up' ? 'belowBar' : 'aboveBar',
     shape: direction === 'up' ? 'arrowUp' : 'arrowDown',
     color: direction === 'up' ? UP_COLOR : DOWN_COLOR,
     text: direction === 'up' ? 'SMA up' : 'SMA down',
-  })))
+  })), ...props.labels.filter((label) => byTime.has(Date.parse(label.timestamp) / 1000)).map((label) => ({
+    time: Date.parse(label.timestamp) / 1000, position: 'aboveBar', shape: 'circle', color: '#182b42', text: label.text,
+  }))].sort((a, b) => a.time - b.time))
 }
 function load(newRows, oldRows) {
   if (!chart) return
   const { candles, prices, volumes } = toChartData(newRows)
+  if (props.flatColor) {
+    for (const price of prices) {
+      if (price.open === price.close) price.color = props.flatColor
+    }
+  }
   byTime = new Map(candles.map((row) => [row.time, row]))
   // A change at the latest timestamp can be applied without resetting the viewport.
   const tail = oldRows ? oldRows.length - 1 : -1
@@ -83,6 +94,7 @@ onMounted(() => {
     localization: { locale: 'en-US', timeFormatter: (time) => new Date(time * 1000).toISOString().replace('T', ' ').replace('.000Z', ' UTC') },
   })
   priceSeries = chart.addSeries(CandlestickSeries, { upColor: UP_COLOR, downColor: DOWN_COLOR, borderVisible: false, wickUpColor: UP_COLOR, wickDownColor: DOWN_COLOR,
+    priceLineVisible: props.showPriceLine,
     priceFormat: { type: 'price', precision: 2, minMove: 0.01 } }, 0)
   markers = createSeriesMarkers(priceSeries)
   volumeSeries = chart.addSeries(HistogramSeries, { priceFormat: { type: 'volume' }, lastValueVisible: false, priceLineVisible: false }, 1)
@@ -100,6 +112,7 @@ onMounted(() => {
 watch(() => props.rows, load)
 watch(() => props.selected, showSelection)
 watch(() => props.indicators, showIndicators)
+watch(() => props.showSmaMarkers, showIndicators)
 onBeforeUnmount(() => chart?.remove())
 defineExpose({ resetView, visibleRange, screenshot })
 </script>

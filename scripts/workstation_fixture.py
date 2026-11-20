@@ -102,7 +102,20 @@ def serve(port, database):
             "answers": [{"name": name, "type": "choice", "choice": value} for name, value in choices.items()],
         }).encode())
 
-    with patch.dict(os.environ, {"OPENAI_API_KEY": "fixture-only"}), patch("backend.decisions.urlopen", transport):
+    exercise_calls = []
+    def exercise_transport(request, timeout):
+        payload = json.loads(request.data)
+        text, image = payload['input'][0]['content']
+        context = json.loads(text['text'])
+        assert set(context) == {'clock', 'signal_minute', 'candle_times'}
+        assert context['signal_minute'] == '2026-11-09T14:35:00Z'
+        decode_capture(image['image_url'])
+        exercise_calls.append(True)
+        if len(exercise_calls) == 2:
+            raise HTTPError(request.full_url, 503, 'Controlled outage', {}, None)
+        return BytesIO(json.dumps({'answers': [{'name': 'direction', 'type': 'choice', 'choice': 'wait'}]}).encode())
+
+    with patch.dict(os.environ, {"OPENAI_API_KEY": "fixture-only"}), patch("backend.decisions.urlopen", transport), patch("backend.chart_exercise.urlopen", exercise_transport):
         uvicorn.run(app, host="127.0.0.1", port=port)
 
 
@@ -144,7 +157,10 @@ def check(database, calls):
             FROM decision_captures c JOIN decisions d ON d.id = c.decision_id
         """).fetchall()
     roles = Counter((call["snapshot_id"], call["role"], call["sha256"]) for call in calls)
-    assert len(captures) == 9
+    assert len(captures) == 7
+    with closing(read_database(database)) as connection:
+        exercises = [json.loads(row[0]) for row in connection.execute('SELECT result FROM chart_exercises ORDER BY rowid')]
+        assert [(e['status'], e['choice']) for e in exercises] == [('completed', 'wait'), ('provider_error', None)]
     for snapshot, png, raw in captures:
         decision = json.loads(raw)
         digest = sha256(png).hexdigest()
@@ -155,7 +171,7 @@ def check(database, calls):
         else:
             assert roles.pop((snapshot, "reviewer", digest)) == 1
     assert not roles, roles
-    print("SQLite PASS: 3 fills, $1,025 cash, 0 shares, $25 realized, $0 unrealized; 9 matched chart captures.", flush=True)
+    print("SQLite PASS: 3 fills, $1,025 cash, 0 shares, $25 realized, $0 unrealized; 7 automation captures and 2 image-only exercises.", flush=True)
 
 
 if __name__ == "__main__":

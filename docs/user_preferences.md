@@ -13,6 +13,14 @@ Source: the project owner's messages typed directly in this chat. These are stat
 
 ## Interface and information priorities
 
+- Collapse crossover lists and candle data by default, with Show more/Show less controls; do not render their entries until expanded. Make the chart SMA marker visibility toggle prominent.
+
+- Put the chart and candle inspector at the top of the workstation, above paper automation, indicators, and feed summary cards.
+
+- The manual Decision API control is an image-only chart-reading exercise with long, short, or wait, a returned choice probability when available, and the signal minute. It must not place trades. Include an educational flowchart.
+- Clicking **Ask about chart** should bring the Decision API panel into view.
+- Use the chart clock (saved-chart replay receipt time or live capture time), floored to the minute, for candle 3. Label its exact preceding one-minute price candles 1 and 2, oldest first. Both green bodies imply long; both red imply short; mixed, flat, missing, unreadable, or stale imply wait. Read each body against its own open and ignore candle 3, wicks, volume, and broader trend. Never skip a missing minute.
+
 - Keep the interface clean and easy to inspect while retaining useful trading context.
 - Make trading volume visible alongside charts.
 - Make implied volatility (IV), changes in IV, and historical IV context visible and easy to compare. Avoid requiring a search or showing only an isolated current number.
@@ -26,6 +34,18 @@ The owner has not yet specified the bot's strategy, brokerage/execution scope, a
 
 ## Chat decision record
 
+- 2026-11-19: Test **Ask about chart** and take the viewer directly to the decision area when it is clicked.
+
+- 2026-11-19: Follow the saved Prompt 15 and verify the image-only chart exercise on the workstation.
+
+- 2026-11-19 browser comment: compress crossover history and candle data using lazy expansion; provide a more visible control for SMA up/down labels on the chart.
+
+- 2026-11-19 browser comment: move the chart to the top of the workstation.
+
+- 2026-11-19: Requested the image-only Decision API exercise and the precise two-preceding-minute question above; verify green, red, and mixed pairs. This scopes the manual exercise and does not redefine the separate paper automation strategy.
+
+- 2026-11-17: Review relevant Markdown files and create `report.md` containing only the GitHub repository link and latest commit link.
+
 - Initial interview: investing/trading tool for personal and broader use; AI assistance, possible automation, options trading; Python/FastAPI/Vue; future reference images and prompts.
 - Prompt 4 follow-up: explicit bot, chart/indicator/option-chain workspace, advising and Decisions API, suggested price alerts and stop-loss/take-profit levels, and visible volume/IV/change/history context. Create this preference record and maintain it only from explicit choices typed in this chat. Complete Prompt 4 and stop after it.
 - 2026-11-12: resume the project after reviewing the project instructions and handoffs, and continue with Prompt 8.
@@ -37,3 +57,5 @@ The owner has not yet specified the bot's strategy, brokerage/execution scope, a
 - 2026-11-16: commit and push the reviewed work through Prompt 12, then proceed to Prompt 13.
 - 2026-11-16: commit and push Prompt 13, then proceed to Prompt 14.
 - After each prompt, explain what it did and keep that reporting instruction in `AGENTS.md`.
+
+- 2026-11-19: Provide pop-out windows for major workstation panels, including chart, inspector and quotes; support option-chain panels when implemented.

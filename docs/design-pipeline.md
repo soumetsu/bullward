@@ -1,5 +1,11 @@
 # Design pipeline and data flow
 
+## Manual image-reading exercise (Prompt 15)
+
+The snapshot filters the workstation’s regular-session one-minute candles to the two required timestamps. The live path uses the observation query’s default row bounds. Replay applies its saved receipt cutoff and row bounds. The exercise uses gray for flat bodies and omits the horizontal price guide to make the candle body colors easier to read. The outbound evidence consists of the three timestamps and the tagged PNG.
+
+The manual chart control uses the independent image-only flow in [chart-exercise.md](chart-exercise.md). Vue renders one-minute data through the two exact preceding minutes, labels 1 and 2, and tags the PNG. FastAPI sends the PNG and timestamp/freshness context only to OpenAI Decisions, then stores the result in `chart_exercises`. The chart clock is the replay receipt cutoff or the live server capture preparation time. Missing minutes or a live-minute rollover produce a local wait guard. This exercise never calls the simulator; the existing automation service retains its analyst/reviewer strategy. The visible chart/inspector now precedes the other workstation panels.
+
 ## Current chart flow (Prompt 4)
 
 ```text
@@ -144,3 +150,7 @@ The Vue workspace has a Yahoo Finance dashboard, a labeled synthetic chart, reco
 - What strategy, execution scope, and order rules should the bot follow?
 - What alert criteria, notification channels, and stop-loss/take-profit suggestion rules should be used?
 - What IV history and option-chain layout should be implemented once actual data is available?
+
+## Chart detail rendering (Prompt 17)
+
+App.vue uses separate expansion state and v-if for crossover history and candle tables, avoiding their DOM/VNode loops while collapsed. Expanded lists scroll within bounded heights. A separate marker visibility prop is applied only to the main chart, default off there; CandleChart defaults it on for existing frozen capture callers. Hiding markers does not alter SMA lines, indicator calculations, numbered capture labels or execution logic.

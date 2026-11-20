@@ -13,6 +13,7 @@ from fastapi import FastAPI, HTTPException, Query, Request, Response, WebSocket,
 from pydantic import BaseModel, Field
 
 from .candles import load_observed_minutes
+from .chart_exercise import ExerciseSelection, ExerciseImage, prepare as prepare_exercise, analyze as analyze_exercise
 from .decisions import (
     DecisionRequest, SnapshotRequest, create_snapshot, get_capture, get_decision, get_snapshot, request_decision,
 )
@@ -269,6 +270,22 @@ def read_decision_snapshot(snapshot_id: UUID):
 def decide(request: DecisionRequest | None = None):
     snapshot_id = str(request.snapshot_id) if request and request.snapshot_id else None
     return request_decision(app.state.feed.db_path, snapshot_id, image_url=request.image_url if request else None)
+
+
+@app.post('/api/chart-exercise/snapshots', status_code=201)
+def freeze_chart_exercise(selection: ExerciseSelection):
+    try:
+        return prepare_exercise(app.state.feed.db_path, selection)
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from None
+
+
+@app.post('/api/chart-exercise', status_code=201)
+def read_chart_exercise(image: ExerciseImage):
+    try:
+        return analyze_exercise(app.state.feed.db_path, image)
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from None
 
 
 @app.get("/api/decisions/{decision_id}")

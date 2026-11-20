@@ -71,6 +71,7 @@ function selectSymbol() {
 
 function publishContext() {
   emit('context', {
+    clock: observation.value.received_at,
     symbol: selection.symbol, start: selection.start, cursor: cursor.id,
     through_id: cursor.throughId, book: hasOrders.value ? book.value : null, runBook: book.value,
   })

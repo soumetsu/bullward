@@ -140,6 +140,8 @@ Build the frontend from `frontend/` with `npm run build`. The exact checks and o
 
 ## Chart workflow and SmokeTest
 
+Crossover history and candle data start collapsed. Use **Show more crossovers** or **Show more candles** to render their entries; **Show fewer** removes them again. The prominent **Show SMA markers / Hide SMA markers** button below the chart controls chart arrows/text independently. Markers start off in the main workstation; SMA lines remain visible.
+
 Open the dashboard to view AAPL at one minute by default. The timeframe selector also offers 5 minutes, 15 minutes, 1 hour, and Daily. Each switch receives a history snapshot and then updates for that interval on a new WebSocket. Hover the chart, use the candle-time selector, or select a table row to inspect OHLC and volume. The inspector shows whether the interval is forming and how many minutes have observations. The dashboard reports Yahoo Finance feed status separately from its FastAPI socket and shows the UTC time and age of the newest source observation.
 
 The chart uses the 2026 Nasdaq regular-session calendar. It starts recording when FastAPI runs and builds history from the local store. An empty database starts with an empty chart. Unknown volume appears as **Unknown** with no bar. `GET /api/history?symbol=AAPL&interval=5m` returns the matching stored history. Open `/?source=sample` for the synthetic chart from `GET /api/history`. Set `INVEST_LIVE_FEED=0` before starting FastAPI to view previously stored data with the Yahoo connection disabled. `INVEST_OBSERVATIONS_DB` overrides the SQLite file.
@@ -221,11 +223,11 @@ The OpenAI provider uses the backend's `OPENAI_API_KEY` environment variable. Th
 
 ## Ask about chart and review
 
-In the live chart or Replay, select a completed candle and click **Ask about chart**. The dashboard freezes the visible chart range through that candle, exports a PNG, and shows the preview and UTC cutoff. The analyst answers **action**, **crossover**, and **evidence**. The reviewer sees the same snapshot, the same PNG, and the analyst's answers before returning a verdict. The result compares the reported crossover with Python's calculation. **Open saved PNG** retrieves the original capture by decision ID.
+Select **1 minute** and click **Ask about chart** for the image-only long/short/wait exercise. It labels the exact two preceding minute candles, uses the chart clock's minute for the signal, and displays the returned choice probability when present. It places no trade. The chart appears above the other workstation controls. See [the educational flowchart and SmokeTest](docs/chart-exercise.md).
 
-The prototype requires an upward SMA crossover for a buy and a downward crossover for a sell or close. Python also checks cash, position, and size. The review can withhold eligibility. An accepted review still needs to pass Python's checks. The chart analysis leaves paper orders and balances untouched.
+Run `python -m scripts.exercise_smoke` to verify the manual control with deterministic charts and controlled model replies in a real browser. This replaces the earlier manual `--chart`/`--chart-live` walkthrough for this button. Live use requires `OPENAI_API_KEY` in the backend process environment.
 
-Run `python scripts/smoke_test.py --chart` for the browser workflow with a controlled provider. Choose **SMA** in Replay, play to the end, select the 14:34 UTC candle, and click **Ask about chart**. Expect a cutoff of 14:35 UTC, analyst answers buy/up/sufficient, and reviewer accept. The runner checks storage and zero orders. With `OPENAI_API_KEY` available to FastAPI, run `python scripts/smoke_test.py --chart-live` on the same constructed chart. Run `python -m scripts.check_decisions` to exercise fixed reviewer results and capture validation through HTTP.
+The separate `/api/decisions` service retains the frozen snapshot, analyst, reviewer, crossover comparison, PNG storage, and account-rule validation for paper automation. Run `python -m scripts.check_decisions` to check that service with fixed replies. Manual image-only exercises use `/api/chart-exercise`, store their own results, and have no order execution path.
 
 ## Paper automation
 
@@ -264,5 +266,5 @@ The test sets `INVEST_PAPER_ORDER_SIZE=4` for buys and `INVEST_PAPER_SELL_SIZE=1
 Run these checks separately for live providers.
 
 - Yahoo prices and saved candles use `python scripts/smoke_test.py --live` during a regular market session.
-- The image model uses `python scripts/smoke_test.py --chart-live` with a backend `OPENAI_API_KEY`.
+- `python -m scripts.exercise_smoke --live` checks the image-only exercise with three constructed chart pairs and `OPENAI_API_KEY` in the process environment.
 - The two-way GPT-Live conversation uses the microphone and speaker procedure in [Discuss a saved decision by voice](#discuss-a-saved-decision-by-voice).
